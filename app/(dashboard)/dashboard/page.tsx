@@ -2,6 +2,7 @@
 "use client";
 
 import { useAnalytics } from "@/hooks/useAnalytics";
+import { useOrders } from "@/hooks/useOrders";
 import {
   BarChart,
   Bar,
@@ -117,6 +118,7 @@ function KPICard({
 
 export default function DashboardPage() {
   const { data: analytics, isLoading } = useAnalytics();
+  const { data: orders = [] } = useOrders();
 
   if (isLoading) {
     return (
@@ -157,18 +159,42 @@ export default function DashboardPage() {
     name: item.name || "Unknown",
     quantity: typeof item.quantity === "number" ? item.quantity : 0,
   }));
+  const orderStats = orders.reduce(
+    (acc: any, order: any) => {
+      const price = Number(order.total_price) || 0;
+
+      if (order.status === "delivered") {
+        acc.income += price;
+      }
+
+      if (["pending", "prepared", "shipped"].includes(order.status)) {
+        acc.expectedIncome += price;
+      }
+
+      if (order.status === "cancelled") {
+        acc.cancelled += price;
+      }
+
+      return acc;
+    },
+    {
+      income: 0,
+      expectedIncome: 0,
+      cancelled: 0,
+    },
+  );
 
   const revenueSummaryData = [
     {
       name: "المالية",
-      revenue: analytics.totalRevenue ?? 0,
+      revenue: orderStats.income,
       cogs: analytics.totalCOGS ?? 0,
       expenses: analytics.totalExpenses ?? 0,
       profit: analytics.netProfit ?? 0,
     },
   ];
 
-  const totalRevenue = analytics.totalRevenue ?? 0;
+  const totalRevenue = orderStats.income;
   const totalExpenses = analytics.totalExpenses ?? 0;
   const totalCOGS = analytics.totalCOGS ?? 0;
   const netProfit = analytics.netProfit ?? 0;
@@ -189,7 +215,8 @@ export default function DashboardPage() {
       </div>
 
       {/* KPI Cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 lg:grid-cols-6 gap-3">
+        {" "}
         <KPICard
           title="الإيرادات"
           value={`${totalRevenue.toFixed(0)}`}
@@ -197,6 +224,21 @@ export default function DashboardPage() {
           icon={DollarSign}
           trend="up"
           color="text-emerald-400"
+        />
+        <KPICard
+          title="الدخل المتوقع"
+          value={`${orderStats.expectedIncome.toFixed(0)}`}
+          sub="طلبات قيد التنفيذ"
+          icon={DollarSign}
+          color="text-yellow-400"
+        />
+        <KPICard
+          title="الملغي"
+          value={`${orderStats.cancelled.toFixed(0)}`}
+          sub="طلبات ملغاة"
+          icon={TrendingDown}
+          trend="down"
+          color="text-red-400"
         />
         <KPICard
           title="المصاريف"

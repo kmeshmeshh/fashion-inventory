@@ -25,10 +25,13 @@ export async function GET(request: NextRequest) {
 
     if (ordersError) throw ordersError;
 
-    const totalRevenue =
-      allOrders?.reduce((sum, o) => sum + o.total_price, 0) || 0;
-    const totalOrders = allOrders?.length || 0;
+    const deliveredOrders =
+      allOrders?.filter((o) => o.status === "delivered") || [];
 
+    const totalRevenue =
+      deliveredOrders.reduce((sum, o) => sum + o.total_price, 0) || 0;
+
+    const totalOrders = deliveredOrders.length;
     console.log("Total Revenue:", totalRevenue, "Total Orders:", totalOrders);
 
     // Get expenses
@@ -49,11 +52,14 @@ export async function GET(request: NextRequest) {
       .from("order_items")
       .select(
         `
-        id,
-        quantity,
-        orders!inner(created_at),
-        products(cost_per_unit)
-      `,
+  id,
+  quantity,
+  orders!inner(
+    created_at,
+    status
+  ),
+  products(cost_per_unit)
+`,
       )
       .gte("orders.created_at", monthStart.toISOString())
       .lte("orders.created_at", monthEnd.toISOString());
@@ -61,9 +67,11 @@ export async function GET(request: NextRequest) {
     if (itemsError) throw itemsError;
 
     const totalCOGS =
-      orderItems?.reduce((sum: number, item: any) => {
-        return sum + item.quantity * (item.products?.cost_per_unit || 0);
-      }, 0) || 0;
+      orderItems
+        ?.filter((item: any) => item.orders?.status === "delivered")
+        .reduce((sum: number, item: any) => {
+          return sum + item.quantity * (item.products?.cost_per_unit || 0);
+        }, 0) || 0;
 
     console.log("Total COGS:", totalCOGS);
 
@@ -76,12 +84,17 @@ export async function GET(request: NextRequest) {
       .from("order_items")
       .select(
         `
-        quantity,
-        products (name)
-      `,
+      quantity,
+      orders!inner(
+        status,
+        created_at
+      ),
+      products(name)
+    `,
       )
-      .gte("created_at", monthStart.toISOString())
-      .lte("created_at", monthEnd.toISOString())
+      .gte("orders.created_at", monthStart.toISOString())
+      .lte("orders.created_at", monthEnd.toISOString())
+      .eq("orders.status", "delivered")
       .order("quantity", { ascending: false })
       .limit(5);
 

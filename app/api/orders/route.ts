@@ -60,7 +60,7 @@ export async function POST(request: NextRequest) {
 
     const supabase = supabaseServer();
 
-    // Validate inventory
+    // 1. Validate inventory
     for (const item of items) {
       const { data: variant } = await supabase
         .from("product_variants")
@@ -77,7 +77,7 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Generate order number
+    // 2. Generate order number
     const { count } = await supabase
       .from("orders")
       .select("*", { count: "exact", head: true });
@@ -89,7 +89,7 @@ export async function POST(request: NextRequest) {
       total_price += item.quantity * item.price_at_sale;
     }
 
-    // Create order
+    // 3. Create order
     const { data: orderData, error: orderError } = await supabase
       .from("orders")
       .insert([
@@ -110,12 +110,13 @@ export async function POST(request: NextRequest) {
 
     const orderId = orderData[0].id;
 
-    // Create order items
+    // 4. Create order items (هنا التعديل الأساسي)
     const orderItems = items.map((item: any) => ({
       order_id: orderId,
       product_id: item.product_id,
       quantity: item.quantity,
       price_at_sale: item.price_at_sale,
+      size: item.size, // <--- ضفنا الـ size هنا عشان يتسجل في الداتابيز
       status: "pending",
     }));
 
@@ -125,7 +126,7 @@ export async function POST(request: NextRequest) {
 
     if (itemsError) throw itemsError;
 
-    // DEDUCT FROM INVENTORY - Simple approach
+    // 5. DEDUCT FROM INVENTORY
     for (const item of items) {
       const { data: currentVariant } = await supabase
         .from("product_variants")
@@ -145,29 +146,6 @@ export async function POST(request: NextRequest) {
       if (updateError) {
         await supabase.from("orders").delete().eq("id", orderId);
         throw new Error("Failed to deduct inventory");
-      }
-    }
-
-    // Create shipment if needed
-    if (shipped_with_courier) {
-      const { data: shipmentData } = await supabase
-        .from("shipments")
-        .insert([
-          {
-            shipment_number: `SHP-${order_number}`,
-            courier_name: "Pending",
-            shipped_date: new Date().toISOString(),
-          },
-        ])
-        .select();
-
-      if (shipmentData) {
-        await supabase.from("shipment_orders").insert([
-          {
-            shipment_id: shipmentData[0].id,
-            order_id: orderId,
-          },
-        ]);
       }
     }
 

@@ -25,8 +25,15 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
-import { Plus, Package, Truck } from "lucide-react";
-
+import {
+  Plus,
+  Package,
+  Truck,
+  CheckCircle,
+  Clock,
+  XCircle,
+  DollarSign,
+} from "lucide-react";
 export default function ShipmentsPage() {
   const { data: shipments, isLoading } = useShipments();
   const { data: orders } = useOrders();
@@ -83,9 +90,48 @@ export default function ShipmentsPage() {
       alert("❌ خطأ في تحديث الحالة");
     }
   };
-
   const pendingOrders =
-    orders?.filter((o: any) => o.status === "pending") || [];
+    orders?.filter(
+      (o: any) => o.status === "pending" || o.status === "prepared",
+    ) || [];
+
+  const shippedOrders =
+    orders?.filter((o: any) => o.status === "shipped") || [];
+
+  const deliveredOrders =
+    orders?.filter((o: any) => o.status === "delivered") || [];
+
+  const cancelledOrders =
+    orders?.filter((o: any) => o.status === "cancelled") || [];
+
+  // مهم: احنا عايزين الشحنات اللي اتعملها assign بس
+  const assignedOrders =
+    shipments?.flatMap(
+      (shipment: any) =>
+        shipment.shipment_orders?.map((so: any) => so.orders) || [],
+    ) || [];
+
+  const assignedPending = assignedOrders.filter(
+    (o: any) => o.status === "pending" || o.status === "prepared",
+  ).length;
+
+  const assignedShipped = assignedOrders.filter(
+    (o: any) => o.status === "shipped",
+  );
+
+  const assignedDelivered = assignedOrders.filter(
+    (o: any) => o.status === "delivered",
+  ).length;
+
+  const assignedCancelled = assignedOrders.filter(
+    (o: any) => o.status === "cancelled",
+  ).length;
+
+  const shippedValue = assignedShipped.reduce(
+    (sum: number, order: any) => sum + (order?.total_price || 0),
+    0,
+  );
+
   const totalValue = (shipment: any) =>
     shipment.shipment_orders?.reduce(
       (s: number, so: any) => s + (so.orders?.total_price || 0),
@@ -113,6 +159,104 @@ export default function ShipmentsPage() {
           <Plus className="w-4 h-4" />
           <span className="hidden sm:inline">شحنة جديدة</span>
         </Button>
+      </div>
+
+      {/* Stats Cards */}
+
+      <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
+        {" "}
+        <Card className="bg-zinc-900 border-zinc-800">
+          <CardContent className="p-4">
+            <div className="flex justify-between items-center">
+              <div>
+                <p className="text-xs text-zinc-500">إجمالي الشحنات</p>
+
+                <p className="text-2xl font-bold text-white">
+                  {shipments?.length || 0}{" "}
+                </p>
+              </div>
+
+              <Package className="w-5 h-5 text-indigo-400" />
+            </div>
+          </CardContent>
+        </Card>
+        <Card className="bg-zinc-900 border-zinc-800">
+          <CardContent className="p-4">
+            <div className="flex justify-between items-center">
+              <div>
+                <p className="text-xs text-zinc-500">معلقة</p>
+
+                <p className="text-2xl font-bold text-yellow-400">
+                  {assignedPending}{" "}
+                </p>
+              </div>
+
+              <Clock className="w-5 h-5 text-yellow-400" />
+            </div>
+          </CardContent>
+        </Card>
+        <Card className="bg-zinc-900 border-zinc-800">
+          <CardContent className="p-4">
+            <div className="flex justify-between">
+              <div>
+                <p className="text-xs text-zinc-500">عند شركة الشحن</p>
+
+                <p className="text-2xl font-bold text-blue-400">
+                  {assignedShipped.length}{" "}
+                </p>
+              </div>
+
+              <Truck className="w-5 h-5 text-blue-400" />
+            </div>
+          </CardContent>
+        </Card>
+        <Card className="bg-zinc-900 border-zinc-800">
+          <CardContent className="p-4">
+            <div className="flex justify-between">
+              <div>
+                <p className="text-xs text-zinc-500">مكتمل</p>
+
+                <p className="text-2xl font-bold text-emerald-400">
+                  {assignedDelivered}{" "}
+                </p>
+              </div>
+
+              <CheckCircle className="w-5 h-5 text-emerald-400" />
+            </div>
+          </CardContent>
+        </Card>
+        <Card className="bg-zinc-900 border-zinc-800">
+          <CardContent className="p-4">
+            <div className="flex justify-between">
+              <div>
+                <p className="text-xs text-zinc-500">ملغي</p>
+
+                <p className="text-2xl font-bold text-red-400">
+                  {assignedCancelled}
+                </p>
+              </div>
+
+              <XCircle className="w-5 h-5 text-red-400" />
+            </div>
+          </CardContent>
+        </Card>
+        <Card className="bg-zinc-900 border-zinc-800 col-span-2 lg:col-span-1">
+          <CardContent className="p-4">
+            <div className="flex justify-between">
+              <div>
+                <p className="text-xs text-zinc-500">قيمة الشحنات</p>
+
+                <p className="text-xl font-bold text-violet-400">
+                  {shippedValue.toFixed(0)}
+                </p>
+
+                <p className="text-[10px] text-zinc-600">EGP</p>
+              </div>
+
+              <DollarSign className="w-5 h-5 text-violet-400" />
+            </div>
+          </CardContent>
+        </Card>
       </div>
 
       {/* Shipments List */}

@@ -5,6 +5,7 @@ import { useState, useCallback } from "react";
 import { useOrders, useCreateOrder, useUpdateOrder } from "@/hooks/useOrders";
 import { useProducts } from "@/hooks/useProducts";
 import { useAuth } from "@/hooks/useAuth";
+import { Clock, CheckCircle2, Ban, ListTodo } from "lucide-react";
 import {
   searchOrders,
   filterOrdersByStatus,
@@ -188,6 +189,21 @@ export default function OrdersPage() {
     filterEndDate,
   );
 
+  const orderStats = {
+    total: orders?.length || 0,
+
+    pending: orders?.filter((o: any) => o.status === "pending").length || 0,
+
+    processing:
+      orders?.filter(
+        (o: any) => o.status === "prepared" || o.status === "shipped",
+      ).length || 0,
+
+    completed: orders?.filter((o: any) => o.status === "delivered").length || 0,
+
+    cancelled: orders?.filter((o: any) => o.status === "cancelled").length || 0,
+  };
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -213,8 +229,10 @@ export default function OrdersPage() {
       {/* Search & Filters */}
       <Card className="bg-zinc-900 border-zinc-800">
         <CardContent className="p-4">
-          <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-            <div className="col-span-2 md:col-span-1">
+          <div className="grid grid-cols-1 md:grid-cols-5 gap-3 items-center">
+            {" "}
+            <div className="md:col-span-2">
+              {" "}
               <Input
                 placeholder="🔍 بحث..."
                 value={searchQuery}
@@ -272,7 +290,55 @@ export default function OrdersPage() {
           </div>
         </CardContent>
       </Card>
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+        <Card className="bg-zinc-900 border-zinc-800">
+          <CardContent className="p-4">
+            <p className="text-xs text-zinc-500">إجمالي الطلبات</p>
+            <p className="text-2xl font-bold text-white">{orderStats.total}</p>
+            <ListTodo className="w-5 h-5 text-indigo-400" />
+          </CardContent>
+        </Card>
 
+        <Card className="bg-zinc-900 border-zinc-800">
+          <CardContent className="p-4">
+            <p className="text-xs text-zinc-500">قيد الانتظار</p>
+            <p className="text-2xl font-bold text-yellow-400">
+              {orderStats.pending}
+            </p>
+            <Clock className="w-5 h-5 text-yellow-400" />
+          </CardContent>
+        </Card>
+
+        <Card className="bg-zinc-900 border-zinc-800">
+          <CardContent className="p-4">
+            <p className="text-xs text-zinc-500">معلقة</p>
+            <p className="text-2xl font-bold text-orange-400">
+              {orderStats.processing}
+            </p>
+            <Clock className="w-5 h-5 text-orange-400" />
+          </CardContent>
+        </Card>
+
+        <Card className="bg-zinc-900 border-zinc-800">
+          <CardContent className="p-4">
+            <p className="text-xs text-zinc-500">مكتملة</p>
+            <p className="text-2xl font-bold text-emerald-400">
+              {orderStats.completed}
+            </p>
+            <CheckCircle2 className="w-5 h-5 text-emerald-400" />
+          </CardContent>
+        </Card>
+
+        <Card className="bg-zinc-900 border-zinc-800">
+          <CardContent className="p-4">
+            <p className="text-xs text-zinc-500">ملغية</p>
+            <p className="text-2xl font-bold text-red-400">
+              {orderStats.cancelled}
+            </p>
+            <Ban className="w-5 h-5 text-red-400" />
+          </CardContent>
+        </Card>
+      </div>
       {/* Orders List */}
       {isLoading ? (
         <div className="space-y-3">
@@ -539,12 +605,13 @@ export default function OrdersPage() {
               <p className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">
                 المنتجات
               </p>
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {" "}
                 <Select
                   value={newItem.product_id}
                   onValueChange={handleProductSelect}
                 >
-                  <SelectTrigger className="bg-zinc-800 border-zinc-700 text-zinc-300 text-sm col-span-2">
+                  <SelectTrigger className="bg-zinc-800 border-zinc-700 text-zinc-300 text-sm">
                     <SelectValue placeholder="اختر المنتج" />
                   </SelectTrigger>
                   <SelectContent className="bg-zinc-800 border-zinc-700">
@@ -559,7 +626,6 @@ export default function OrdersPage() {
                     ))}
                   </SelectContent>
                 </Select>
-
                 <Select
                   value={newItem.size}
                   onValueChange={(v) => setNewItem({ ...newItem, size: v })}
@@ -583,7 +649,6 @@ export default function OrdersPage() {
                     })}
                   </SelectContent>
                 </Select>
-
                 <div className="flex gap-2 col-span-2">
                   <Input
                     type="number"
