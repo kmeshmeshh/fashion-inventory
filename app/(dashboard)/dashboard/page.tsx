@@ -1,8 +1,8 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 "use client";
 
-import { useAnalytics } from "@/hooks/useAnalytics";
-import { useOrders } from "@/hooks/useOrders";
+import { useState } from "react";
+import { useAnalytics, AnalyticsRange } from "@/hooks/useAnalytics";
 import {
   BarChart,
   Bar,
@@ -25,9 +25,7 @@ import {
   Package,
   ShoppingCart,
   BarChart3,
-  Wallet,
   Receipt,
-  Ban,
 } from "lucide-react";
 
 const COLORS = [
@@ -112,14 +110,14 @@ function KPICard({
             >
               {value}
             </p>
-            <p className="text-[11px] text-zinc-600 flex items-center gap-1">
+            <p className="text-[11px] text-zinc-600 flex items-start gap-1">
               {trend === "up" && (
-                <TrendingUp className="w-3 h-3 text-emerald-500 shrink-0" />
+                <TrendingUp className="w-3 h-3 text-emerald-500 shrink-0 mt-0.5" />
               )}
               {trend === "down" && (
-                <TrendingDown className="w-3 h-3 text-red-500 shrink-0" />
+                <TrendingDown className="w-3 h-3 text-red-500 shrink-0 mt-0.5" />
               )}
-              <span className="truncate">{sub}</span>
+              <span className="leading-snug">{sub}</span>
             </p>
           </div>
           <div className="p-2 rounded-lg bg-zinc-800 shrink-0">
@@ -131,9 +129,58 @@ function KPICard({
   );
 }
 
+const RANGE_OPTIONS: { value: AnalyticsRange; label: string }[] = [
+  { value: "this_month", label: "هذا الشهر" },
+  { value: "last_month", label: "الشهر اللي فات" },
+  { value: "all_time", label: "كل الوقت" },
+  { value: "custom", label: "فترة مخصصة" },
+];
+
 export default function DashboardPage() {
-  const { data: analytics, isLoading } = useAnalytics();
-  const { data: orders = [] } = useOrders();
+  const [range, setRange] = useState<AnalyticsRange>("this_month");
+  const [customFrom, setCustomFrom] = useState("");
+  const [customTo, setCustomTo] = useState("");
+
+  const { data: analytics, isLoading } = useAnalytics({
+    range,
+    from: customFrom,
+    to: customTo,
+  });
+
+  const filterBar = (
+    <div className="flex flex-wrap items-center gap-2">
+      {RANGE_OPTIONS.map((opt) => (
+        <button
+          key={opt.value}
+          onClick={() => setRange(opt.value)}
+          className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+            range === opt.value
+              ? "bg-violet-600 text-white"
+              : "bg-zinc-900 text-zinc-400 border border-zinc-800 hover:border-zinc-700"
+          }`}
+        >
+          {opt.label}
+        </button>
+      ))}
+      {range === "custom" && (
+        <div className="flex items-center gap-2 ms-1">
+          <input
+            type="date"
+            value={customFrom}
+            onChange={(e) => setCustomFrom(e.target.value)}
+            className="bg-zinc-900 border border-zinc-800 rounded-lg px-2 py-1.5 text-xs text-zinc-300 focus:outline-none focus:border-violet-500"
+          />
+          <span className="text-zinc-600 text-xs">إلى</span>
+          <input
+            type="date"
+            value={customTo}
+            onChange={(e) => setCustomTo(e.target.value)}
+            className="bg-zinc-900 border border-zinc-800 rounded-lg px-2 py-1.5 text-xs text-zinc-300 focus:outline-none focus:border-violet-500"
+          />
+        </div>
+      )}
+    </div>
+  );
 
   if (isLoading) {
     return (
@@ -153,14 +200,22 @@ export default function DashboardPage() {
     );
   }
 
-  if (!analytics) {
+  if (!analytics || analytics.error) {
     return (
-      <div className="flex flex-col items-center justify-center h-64 text-zinc-600 gap-2">
-        <BarChart3 className="w-10 h-10 opacity-30" />
-        <p className="text-sm text-zinc-500">لا توجد بيانات كافية بعد</p>
-        <p className="text-xs text-zinc-700">
-          هتظهر هنا أول ما تسجّل طلبات ومصاريف
-        </p>
+      <div className="space-y-6">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+          <h1 className="text-2xl font-bold text-white tracking-tight">
+            لوحة التحكم
+          </h1>
+          {filterBar}
+        </div>
+        <div className="flex flex-col items-center justify-center h-64 text-zinc-600 gap-2">
+          <BarChart3 className="w-10 h-10 opacity-30" />
+          <p className="text-sm text-zinc-500">لا توجد بيانات كافية بعد</p>
+          <p className="text-xs text-zinc-700">
+            هتظهر هنا أول ما تسجّل طلبات ومصاريف في الفترة دي
+          </p>
+        </div>
       </div>
     );
   }
@@ -179,47 +234,45 @@ export default function DashboardPage() {
     quantity: typeof item.quantity === "number" ? item.quantity : 0,
   }));
 
-  const orderStats = orders.reduce(
-    (acc: any, order: any) => {
-      const price = Number(order.total_price) || 0;
-      if (order.status === "delivered") acc.income += price;
-      if (["pending", "prepared", "shipped"].includes(order.status))
-        acc.expectedIncome += price;
-      if (order.status === "cancelled") acc.cancelled += price;
-      return acc;
-    },
-    { income: 0, expectedIncome: 0, cancelled: 0 },
-  );
+  // All figures now come from the single analytics source — no mixed-period bugs
+  const totalRevenue = analytics.totalRevenue ?? 0;
+  const expectedIncome = analytics.expectedIncome ?? 0;
+  const cancelledAmount = analytics.cancelledAmount ?? 0;
+  const totalExpenses = analytics.totalExpenses ?? 0;
+  const totalCOGS = analytics.totalCOGS ?? 0;
+  const totalPurchaseCost = analytics.totalPurchaseCost ?? 0;
+  const totalSpending = analytics.totalSpending ?? 0;
+  const netProfit = analytics.netProfit ?? 0;
+  const totalOrders = analytics.totalOrders ?? 0;
 
   const revenueSummaryData = [
     {
       name: "المالية",
-      revenue: orderStats.income,
-      cogs: analytics.totalCOGS ?? 0,
-      expenses: analytics.totalExpenses ?? 0,
-      profit: analytics.netProfit ?? 0,
+      revenue: totalRevenue,
+      cogs: totalCOGS,
+      expenses: totalExpenses,
+      profit: netProfit,
     },
   ];
-
-  const totalRevenue = orderStats.income;
-  const totalExpenses = analytics.totalExpenses ?? 0;
-  const totalCOGS = analytics.totalCOGS ?? 0;
-  const netProfit = analytics.netProfit ?? 0;
-  const totalOrders = analytics.totalOrders ?? 0;
 
   const avgOrderValue = totalOrders > 0 ? totalRevenue / totalOrders : 0;
   const profitMargin = totalRevenue > 0 ? (netProfit / totalRevenue) * 100 : 0;
   const expenseRatio =
-    totalRevenue > 0 ? (totalExpenses / totalRevenue) * 100 : 0;
+    totalRevenue > 0 ? (totalSpending / totalRevenue) * 100 : 0;
   const isProfitable = netProfit >= 0;
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-white tracking-tight">
-          لوحة التحكم
-        </h1>
-        <p className="text-zinc-500 text-sm mt-1">نظرة عامة على أداء المتجر</p>
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-bold text-white tracking-tight">
+            لوحة التحكم
+          </h1>
+          <p className="text-zinc-500 text-sm mt-1">
+            نظرة عامة على أداء المتجر
+          </p>
+        </div>
+        {filterBar}
       </div>
 
       {/* Hero — Net Profit */}
@@ -268,7 +321,7 @@ export default function DashboardPage() {
                   تكلفة البضاعة
                 </p>
                 <p className="text-sm font-bold text-blue-400 tabular-nums">
-                  {fmt(totalCOGS)}
+                  {fmt(totalPurchaseCost)}
                 </p>
               </div>
               <div>
@@ -282,66 +335,38 @@ export default function DashboardPage() {
         </CardContent>
       </Card>
 
-      {/* KPI Cards */}
-      <div>
-        <p className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-2.5">
-          الإيرادات والطلبات
-        </p>
-        <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
-          <KPICard
-            title="الدخل المتوقع"
-            value={fmt(orderStats.expectedIncome)}
-            sub="طلبات قيد التنفيذ"
-            icon={Wallet}
-            color="text-yellow-400"
-          />
-          <KPICard
-            title="طلبات ملغاة"
-            value={fmt(orderStats.cancelled)}
-            sub="EGP قيمة ملغاة"
-            icon={Ban}
-            trend="down"
-            color="text-red-400"
-          />
-          <KPICard
-            title="متوسط قيمة الطلب"
-            value={fmt(avgOrderValue)}
-            sub={`${totalOrders} طلب إجمالاً`}
-            icon={ShoppingCart}
-            color="text-indigo-400"
-          />
-        </div>
-      </div>
-
-      <div>
-        <p className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-2.5">
-          الكفاءة التشغيلية
-        </p>
-        <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
-          <KPICard
-            title="تكلفة البضاعة"
-            value={fmt(totalCOGS)}
-            sub="COGS إجمالي"
-            icon={Package}
-            color="text-blue-400"
-          />
-          <KPICard
-            title="نسبة المصاريف"
-            value={`${expenseRatio.toFixed(1)}%`}
-            sub="من الإيرادات"
-            icon={Receipt}
-            trend="down"
-            color="text-orange-400"
-          />
-          <KPICard
-            title="هامش الربح"
-            value={`${profitMargin.toFixed(1)}%`}
-            sub={isProfitable ? "أداء إيجابي" : "أداء سلبي"}
-            icon={DollarSign}
-            trend={isProfitable ? "up" : "down"}
-            color={isProfitable ? "text-violet-400" : "text-red-400"}
-          />
-        </div>
+      {/* Consolidated KPI Cards — one row, no duplication/overlap */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <KPICard
+          title="الدخل المتوقع"
+          value={fmt(expectedIncome)}
+          sub="طلبات قيد التنفيذ"
+          icon={ShoppingCart}
+          color="text-yellow-400"
+        />
+        <KPICard
+          title="طلبات ملغاة"
+          value={fmt(cancelledAmount)}
+          sub="قيمة ملغاة (EGP)"
+          icon={TrendingDown}
+          trend="down"
+          color="text-red-400"
+        />
+        <KPICard
+          title="متوسط قيمة الطلب"
+          value={fmt(avgOrderValue)}
+          sub={`${totalOrders} طلب مُسلَّم`}
+          icon={Package}
+          color="text-indigo-400"
+        />
+        <KPICard
+          title="إجمالي المصروفات"
+          value={fmt(totalSpending)}
+          sub={`نسبة ${expenseRatio.toFixed(1)}% من الإيرادات`}
+          icon={Receipt}
+          trend="down"
+          color="text-orange-400"
+        />
       </div>
 
       {/* Charts Row 1 */}
@@ -437,7 +462,7 @@ export default function DashboardPage() {
               <div className="flex flex-col items-center justify-center h-64 text-zinc-600 gap-1.5">
                 <Receipt className="w-8 h-8 opacity-30" />
                 <p className="text-sm text-zinc-600">
-                  لا توجد مصاريف مسجلة بعد
+                  لا توجد مصاريف مسجلة في الفترة دي
                 </p>
               </div>
             )}
@@ -488,7 +513,7 @@ export default function DashboardPage() {
               <div className="flex flex-col items-center justify-center h-64 text-zinc-600 gap-1.5">
                 <Package className="w-8 h-8 opacity-30" />
                 <p className="text-sm text-zinc-600">
-                  لا توجد بيانات مبيعات بعد
+                  لا توجد بيانات مبيعات في الفترة دي
                 </p>
               </div>
             )}
@@ -504,18 +529,11 @@ export default function DashboardPage() {
           <CardContent className="space-y-2.5">
             {[
               {
-                label: "عدد الطلبات",
+                label: "عدد الطلبات المُسلَّمة",
                 value: totalOrders,
                 unit: "",
                 color: "text-blue-400",
                 bg: "bg-blue-500/10",
-              },
-              {
-                label: "متوسط قيمة الطلب",
-                value: avgOrderValue.toFixed(0),
-                unit: " EGP",
-                color: "text-emerald-400",
-                bg: "bg-emerald-500/10",
               },
               {
                 label: "نسبة الربح",
@@ -525,7 +543,7 @@ export default function DashboardPage() {
                 bg: "bg-violet-500/10",
               },
               {
-                label: "المصاريف (نسبة)",
+                label: "نسبة التكاليف الإجمالية",
                 value: expenseRatio.toFixed(1),
                 unit: "%",
                 color: "text-red-400",

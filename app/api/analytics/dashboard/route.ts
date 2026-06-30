@@ -2,26 +2,55 @@
 import { supabaseServer } from "@/lib/supabase";
 import { NextRequest, NextResponse } from "next/server";
 
+function getDateRange(searchParams: URLSearchParams) {
+  const range = searchParams.get("range") || "this_month";
+  const now = new Date();
+
+  if (range === "custom") {
+    const from = searchParams.get("from");
+    const to = searchParams.get("to");
+    if (from && to) {
+      return {
+        start: new Date(`${from}T00:00:00`),
+        end: new Date(`${to}T23:59:59`),
+      };
+    }
+  }
+
+  if (range === "last_month") {
+    const start = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    const end = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59);
+    return { start, end };
+  }
+
+  if (range === "all_time") {
+    return {
+      start: new Date(2000, 0, 1),
+      end: new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59),
+    };
+  }
+
+  // default: this_month
+  const start = new Date(now.getFullYear(), now.getMonth(), 1);
+  const end = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59);
+  return { start, end };
+}
+
 export async function GET(request: NextRequest) {
   try {
     const supabase = supabaseServer();
+    const { searchParams } = new URL(request.url);
+    const { start, end } = getDateRange(searchParams);
 
-    // Get this month's date range
-    const now = new Date();
-    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-    const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+    const startStr = start.toISOString().split("T")[0];
+    const endStr = end.toISOString().split("T")[0];
 
-    const monthStartStr = monthStart.toISOString().split("T")[0];
-    const monthEndStr = monthEnd.toISOString().split("T")[0];
-
-    console.log("Analytics - Month range:", monthStartStr, "to", monthEndStr);
-
-    // Get ALL orders (not just delivered) - calculate revenue
+    // Get ALL orders in range (any status) - single source of truth
     const { data: allOrders, error: ordersError } = await supabase
       .from("orders")
       .select("id, total_price, created_at, status")
-      .gte("created_at", monthStart.toISOString())
-      .lte("created_at", monthEnd.toISOString());
+      .gte("created_at", start.toISOString())
+      .lte("created_at", end.toISOString());
 
     if (ordersError) throw ordersError;
 
@@ -29,25 +58,35 @@ export async function GET(request: NextRequest) {
       allOrders?.filter((o) => o.status === "delivered") || [];
 
     const totalRevenue =
-      deliveredOrders.reduce((sum, o) => sum + o.total_price, 0) || 0;
+      deliveredOrders.reduce((sum, o) => sum + (o.total_price || 0), 0) || 0;
 
     const totalOrders = deliveredOrders.length;
-    console.log("Total Revenue:", totalRevenue, "Total Orders:", totalOrders);
+
+    const expectedIncome =
+      allOrders
+        ?.filter((o) => ["pending", "prepared", "shipped"].includes(o.status))
+        .reduce((sum, o) => sum + (o.total_price || 0), 0) || 0;
+
+    const cancelledAmount =
+      allOrders
+        ?.filter((o) => o.status === "cancelled")
+        .reduce((sum, o) => sum + (o.total_price || 0), 0) || 0;
+
+    const allOrdersCount = allOrders?.length || 0;
 
     // Get expenses
     const { data: expenses, error: expensesError } = await supabase
       .from("expenses")
       .select("amount, category, date")
-      .gte("date", monthStartStr)
-      .lte("date", monthEndStr);
+      .gte("date", startStr)
+      .lte("date", endStr);
 
     if (expensesError) throw expensesError;
 
-    const totalExpenses = expenses?.reduce((sum, e) => sum + e.amount, 0) || 0;
+    const totalExpenses =
+      expenses?.reduce((sum, e) => sum + (e.amount || 0), 0) || 0;
 
-    console.log("Total Expenses:", totalExpenses);
-
-    // Get order items with product costs - COGS
+    // Get order items with product costs - COGS (delivered only)
     const { data: orderItems, error: itemsError } = await supabase
       .from("order_items")
       .select(
@@ -61,8 +100,8 @@ export async function GET(request: NextRequest) {
   products(cost_per_unit)
 `,
       )
-      .gte("orders.created_at", monthStart.toISOString())
-      .lte("orders.created_at", monthEnd.toISOString());
+      .gte("orders.created_at", start.toISOString())
+      .lte("orders.created_at", end.toISOString());
 
     if (itemsError) throw itemsError;
 
@@ -73,13 +112,27 @@ export async function GET(request: NextRequest) {
           return sum + item.quantity * (item.products?.cost_per_unit || 0);
         }, 0) || 0;
 
-    console.log("Total COGS:", totalCOGS);
-
     const netProfit = totalRevenue - totalCOGS - totalExpenses;
 
-    console.log("Net Profit:", netProfit);
+    // Total purchase cost = cost of stock still on hand + cost of stock already sold (delivered)
+    // This answers "how much money have I spent buying inventory in total", regardless of what's sold yet.
+    const { data: allProducts, error: productsError } = await supabase
+      .from("products")
+      .select("current_stock, cost_per_unit");
 
-    // Best sellers
+    if (productsError) throw productsError;
+
+    const remainingStockValue =
+      allProducts?.reduce(
+        (sum: number, p: any) =>
+          sum + (p.current_stock || 0) * (p.cost_per_unit || 0),
+        0,
+      ) || 0;
+
+    const totalPurchaseCost = remainingStockValue + totalCOGS;
+    const totalSpending = totalPurchaseCost + totalExpenses;
+
+    // Best sellers (delivered only)
     const { data: bestSellers } = await supabase
       .from("order_items")
       .select(
@@ -92,8 +145,8 @@ export async function GET(request: NextRequest) {
       products(name)
     `,
       )
-      .gte("orders.created_at", monthStart.toISOString())
-      .lte("orders.created_at", monthEnd.toISOString())
+      .gte("orders.created_at", start.toISOString())
+      .lte("orders.created_at", end.toISOString())
       .eq("orders.status", "delivered")
       .order("quantity", { ascending: false })
       .limit(5);
@@ -106,11 +159,20 @@ export async function GET(request: NextRequest) {
     });
 
     return NextResponse.json({
+      range: searchParams.get("range") || "this_month",
+      from: startStr,
+      to: endStr,
       totalRevenue: Math.round(totalRevenue * 100) / 100,
+      expectedIncome: Math.round(expectedIncome * 100) / 100,
+      cancelledAmount: Math.round(cancelledAmount * 100) / 100,
       totalExpenses: Math.round(totalExpenses * 100) / 100,
       totalCOGS: Math.round(totalCOGS * 100) / 100,
       netProfit: Math.round(netProfit * 100) / 100,
+      remainingStockValue: Math.round(remainingStockValue * 100) / 100,
+      totalPurchaseCost: Math.round(totalPurchaseCost * 100) / 100,
+      totalSpending: Math.round(totalSpending * 100) / 100,
       totalOrders,
+      allOrdersCount,
       bestSellers:
         bestSellers?.map((item: any) => ({
           name: item.products?.name || "Unknown",

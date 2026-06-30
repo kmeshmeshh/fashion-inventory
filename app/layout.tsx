@@ -4,10 +4,13 @@ import "./globals.css";
 import { Geist } from "next/font/google";
 import { cn } from "@/lib/utils";
 
-const geist = Geist({subsets:['latin'],variable:'--font-sans'});
+const geist = Geist({ subsets: ["latin"], variable: "--font-sans" });
 
 export const metadata: Metadata = {
-  title: "Fashion Inventory",
+  title: "Basik",
+  icons: {
+    icon: "/1.png",
+  },
   description: "Manage your fashion business inventory",
 };
 
