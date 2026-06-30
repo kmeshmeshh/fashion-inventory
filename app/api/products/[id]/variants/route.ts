@@ -1,5 +1,30 @@
+import { productVariantCreateSchema } from "@/lib/apiTypes";
 import { supabaseServer } from "@/lib/supabase";
 import { NextRequest, NextResponse } from "next/server";
+
+async function refreshCurrentStock(
+  supabase: ReturnType<typeof supabaseServer>,
+  productId: number,
+) {
+  const { data: variants, error: variantError } = await supabase
+    .from("product_variants")
+    .select("quantity")
+    .eq("product_id", productId);
+
+  if (variantError) throw variantError;
+
+  const totalStock = (variants || []).reduce(
+    (sum, variant) => sum + (variant.quantity ?? 0),
+    0,
+  );
+
+  const { error: updateError } = await supabase
+    .from("products")
+    .update({ current_stock: totalStock })
+    .eq("id", productId);
+
+  if (updateError) throw updateError;
+}
 
 // GET variants for product
 export async function GET(
@@ -7,17 +32,15 @@ export async function GET(
   context: { params: Promise<{ id: string }> },
 ) {
   try {
-    // ✅ AWAIT the params!
     const params = await context.params;
     const id = params.id;
-
-    console.log("GET variants - Raw ID:", id);
     const productId = parseInt(id, 10);
-    console.log("GET variants - Parsed ID:", productId);
 
     if (isNaN(productId) || productId <= 0) {
-      console.log("GET variants - Invalid ID");
-      return NextResponse.json([]);
+      return NextResponse.json(
+        { error: "Invalid product ID" },
+        { status: 400 },
+      );
     }
 
     const supabase = supabaseServer();
@@ -30,14 +53,13 @@ export async function GET(
 
     if (error) {
       console.error("GET variants - DB error:", error);
-      return NextResponse.json([]);
+      return NextResponse.json([], { status: 500 });
     }
 
-    console.log("GET variants - Found:", data?.length || 0, "variants");
     return NextResponse.json(data || []);
   } catch (error) {
     console.error("GET variants - Catch error:", error);
-    return NextResponse.json([]);
+    return NextResponse.json([], { status: 500 });
   }
 }
 
@@ -47,96 +69,102 @@ export async function POST(
   context: { params: Promise<{ id: string }> },
 ) {
   try {
-    // ✅ AWAIT the params!
     const params = await context.params;
     const id = params.id;
     const body = await request.json();
 
-    console.log("=== POST VARIANT ===");
-    console.log("Raw ID:", id);
-    console.log("Body:", body);
-
     const productId = parseInt(id, 10);
-    console.log("Parsed productId:", productId);
-
-    const { size, quantity } = body;
-
-    // Validate
     if (isNaN(productId) || productId <= 0) {
-      console.log("Invalid productId");
       return NextResponse.json(
         { error: `Invalid product ID: ${id}` },
         { status: 400 },
       );
     }
 
-    if (!size || quantity === undefined) {
-      console.log("Missing size or quantity");
+    const parseResult = productVariantCreateSchema.safeParse(body);
+    if (!parseResult.success) {
       return NextResponse.json(
-        { error: "Missing size or quantity" },
+        {
+          error: parseResult.error.issues
+            .map((issue) => `${issue.path.join(".")}: ${issue.message}`)
+            .join(", "),
+        },
         { status: 400 },
       );
     }
 
-    const qty = parseInt(String(quantity), 10);
-
-    if (isNaN(qty) || qty < 0) {
-      return NextResponse.json({ error: "Invalid quantity" }, { status: 400 });
-    }
-
+    const { size, quantity } = parseResult.data;
     const supabase = supabaseServer();
 
-    // Check existing
-    console.log(
-      "Checking for existing variant with product_id:",
-      productId,
-      "size:",
-      size,
-    );
+    const { data: product } = await supabase
+      .from("products")
+      .select("id")
+      .eq("id", productId)
+      .maybeSingle();
 
-    const { data: existing } = await supabase
+    if (!product) {
+      return NextResponse.json({ error: "Product not found" }, { status: 404 });
+    }
+
+    const { data: existing, error: existingError } = await supabase
       .from("product_variants")
       .select("id")
       .eq("product_id", productId)
       .eq("size", size)
       .maybeSingle();
 
-    console.log("Existing variant:", existing?.id || "None");
+    if (existingError) throw existingError;
 
     if (existing?.id) {
-      // UPDATE
-      console.log("Updating variant...");
       const { data, error } = await supabase
         .from("product_variants")
-        .update({ quantity: qty })
+        .update({ quantity })
         .eq("id", existing.id)
         .select()
         .single();
 
       if (error) throw error;
 
-      console.log("Updated:", data);
-      return NextResponse.json(data);
-    } else {
-      // INSERT
-      console.log("Creating new variant...");
-      const { data, error } = await supabase
-        .from("product_variants")
-        .insert({
+      const { error: logError } = await supabase.from("inventory_logs").insert([
+        {
           product_id: productId,
-          size,
-          quantity: qty,
-        })
-        .select()
-        .single();
+          quantity_changed: quantity,
+          reason: "adjustment",
+          reference_id: null,
+        },
+      ]);
+      if (logError) throw logError;
 
-      if (error) throw error;
-
-      console.log("Created:", data);
-      return NextResponse.json(data, { status: 201 });
+      await refreshCurrentStock(supabase, productId);
+      return NextResponse.json(data);
     }
+
+    const { data, error } = await supabase
+      .from("product_variants")
+      .insert({
+        product_id: productId,
+        size,
+        quantity,
+      })
+      .select()
+      .single();
+
+    if (error) throw error;
+
+    const { error: logError } = await supabase.from("inventory_logs").insert([
+      {
+        product_id: productId,
+        quantity_changed: quantity,
+        reason: "restock",
+        reference_id: null,
+      },
+    ]);
+    if (logError) throw logError;
+
+    await refreshCurrentStock(supabase, productId);
+    return NextResponse.json(data, { status: 201 });
   } catch (error) {
-    console.error("POST error:", error);
+    console.error("POST variant error:", error);
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Server error" },
       { status: 500 },

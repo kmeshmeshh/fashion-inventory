@@ -1,9 +1,10 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 "use client";
 
-import { useState, useCallback, useMemo } from "react";
+import { useState, useCallback } from "react";
 import { useOrders, useCreateOrder, useUpdateOrder } from "@/hooks/useOrders";
 import { useProducts } from "@/hooks/useProducts";
+import { useShippingCities } from "@/hooks/useShippingCities";
 import { useAuth } from "@/hooks/useAuth";
 import {
   Clock,
@@ -19,7 +20,7 @@ import {
   filterOrdersByDate,
 } from "@/lib/filters";
 import { ORDER_STATUSES, STATUS_CONFIG } from "@/lib/orderStatus";
-import { Card, CardContent, CardHeader } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -42,7 +43,13 @@ import {
 import { Plus, ShoppingCart, X, Truck, Package2, Link2 } from "lucide-react";
 import { FaFacebook, FaInstagram, FaWhatsapp } from "react-icons/fa";
 
-const ORDER_SOURCES = ["facebook", "instagram", "whatsapp", "other"] as const;
+const ORDER_SOURCES = [
+  "facebook",
+  "instagram",
+  "whatsapp",
+  "jumia",
+  "other",
+] as const;
 
 const SOURCE_CONFIG = {
   facebook: {
@@ -60,6 +67,11 @@ const SOURCE_CONFIG = {
     icon: FaWhatsapp,
     className: "bg-emerald-500/10 text-emerald-400 border-emerald-500/20",
   },
+  jumia: {
+    label: "جوميا",
+    icon: ShoppingCart,
+    className: "bg-orange-500/10 text-orange-300 border-orange-500/20",
+  },
   other: {
     label: "أخرى",
     icon: Link2,
@@ -72,11 +84,177 @@ type SourceKey = keyof typeof SOURCE_CONFIG;
 const fmt = (n: number) =>
   new Intl.NumberFormat("ar-EG", { maximumFractionDigits: 0 }).format(n);
 
+const formatFullDate = (value?: string) =>
+  value
+    ? new Date(value).toLocaleString("ar-EG", {
+        year: "numeric",
+        month: "long",
+        day: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+      })
+    : "";
+
+const printInvoice = (order: any) => {
+  if (typeof window === "undefined") return;
+
+  const itemsHtml = (order.order_items || [])
+    .map(
+      (item: any) => `
+        <tr>
+          <td>${String(item.products?.name || "-")}</td>
+          <td class="text-center">${String(item.size || "-")}</td>
+          <td class="text-center">${String(item.quantity || 0)}</td>
+          <td class="text-right">${fmt(item.price_at_sale || 0)} EGP</td>
+          <td class="text-right">${fmt(
+            (item.quantity || 0) * (item.price_at_sale || 0),
+          )} EGP</td>
+        </tr>
+      `,
+    )
+    .join("");
+
+  const shippingFee = order.shipping_city?.shipping_fee || 0;
+  const shippingCityName = order.shipping_city?.city_name || "غير محدد";
+  const discount = order.discount || 0;
+  const subtotal = (order.total_price || 0) + discount;
+
+  const html = `
+    <html lang="ar" dir="rtl">
+      <head>
+        <meta charset="utf-8" />
+        <title>فاتورة BASIK - ${String(order.order_number)}</title>
+        <style>
+          body { margin: 0; padding: 0; font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif; background: #f7f7f7; color: #111; }
+          .page { max-width: 900px; margin: 0 auto; padding: 32px; background: #fff; }
+          .brand { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-bottom: 24px; }
+          .brand-logo { font-size: 42px; font-weight: 900; letter-spacing: -2px; color: #111; }
+          .brand-subtitle { text-transform: uppercase; font-size: 10px; color: #555; margin-top: 4px; }
+          .invoice-meta { text-align: right; }
+          .invoice-meta h1 { margin: 0; font-size: 24px; }
+          .invoice-meta p { margin: 4px 0; color: #555; }
+          .customer-info { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 26px; }
+          .customer-box { padding: 18px; border: 1px solid #e5e7eb; border-radius: 16px; background: #fafafa; }
+          .customer-box h2 { margin: 0 0 8px; font-size: 14px; color: #111; }
+          .customer-box p { margin: 6px 0; font-size: 13px; color: #444; }
+          .table-wrapper { overflow-x: auto; }
+          table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
+          th, td { padding: 14px 12px; border: 1px solid #e5e7eb; }
+          th { background: #111; color: #fff; font-size: 13px; text-align: center; }
+          td { font-size: 13px; color: #333; }
+          td.text-right { text-align: right; }
+          td.text-center { text-align: center; }
+          .summary { display: grid; grid-template-columns: 1fr auto; gap: 16px; align-items: start; }
+          .summary-details { padding: 18px; border: 1px solid #e5e7eb; border-radius: 16px; background: #fafafa; }
+          .summary-list { width: 320px; border-collapse: collapse; }
+          .summary-list td { padding: 12px; border: none; }
+          .summary-list tr + tr td { border-top: 1px solid #e5e7eb; }
+          .summary-list .label { color: #555; }
+          .summary-list .value { text-align: right; font-weight: 700; }
+          .summary-list .total { font-size: 17px; color: #111; }
+          .footer { margin-top: 32px; border-top: 1px solid #e5e7eb; padding-top: 16px; display: flex; justify-content: space-between; align-items: center; color: #555; font-size: 12px; }
+          .footer strong { color: #111; }
+        </style>
+      </head>
+      <body>
+        <div class="page">
+          <div class="brand">
+            <div>
+              <div class="brand-logo">BASIK</div>
+              <div class="brand-subtitle">Men's Wear</div>
+            </div>
+            <div class="invoice-meta">
+              <h1>فاتورة</h1>
+              <p>رقم الطلب: ${String(order.order_number || "-")}</p>
+              <p>التاريخ: ${formatFullDate(order.created_at)}</p>
+            </div>
+          </div>
+
+          <div class="customer-info">
+            <div class="customer-box">
+              <h2>بيانات العميل</h2>
+              <p>الاسم: ${String(order.customer_name || "-")}</p>
+              <p>الموبيل: ${String(order.customer_phone || "-")}</p>
+              <p>العنوان: ${String(order.customer_address || "-")}</p>
+            </div>
+            <div class="customer-box">
+              <h2>تفاصيل الطلب</h2>
+              <p>مصدر الطلب: ${String(
+                SOURCE_CONFIG[order.source as SourceKey]?.label || "-",
+              )}</p>
+              <p>مدينة التوصيل: ${shippingCityName}</p>
+              <p>رسوم التوصيل: ${fmt(shippingFee)} EGP</p>
+              <p>ملاحظات: ${String(order.notes || "-")}</p>
+            </div>
+          </div>
+
+          <div class="table-wrapper">
+            <table>
+              <thead>
+                <tr>
+                  <th>المنتج</th>
+                  <th>المقاس</th>
+                  <th>الكمية</th>
+                  <th>سعر الوحدة</th>
+                  <th>الإجمالي</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${itemsHtml}
+              </tbody>
+            </table>
+          </div>
+
+          <div class="summary">
+            <table class="summary-list">
+              <tr>
+                <td class="label">إجمالي المنتجات</td>
+                <td class="value">${fmt(subtotal)} EGP</td>
+              </tr>
+              ${
+                discount > 0
+                  ? `
+                <tr>
+                  <td class="label">الخصم</td>
+                  <td class="value">-${fmt(discount)} EGP</td>
+                </tr>
+              `
+                  : ""
+              }
+              <tr>
+                <td class="label">رسوم التوصيل</td>
+                <td class="value">${fmt(shippingFee)} EGP</td>
+              </tr>
+              <tr>
+                <td class="label total">الإجمالي النهائي</td>
+                <td class="value total">${fmt((order.total_price || 0) + shippingFee)} EGP</td>
+              </tr>
+            </table>
+          </div>
+
+          <div class="footer">
+            <div>شكراً لتعاملكم مع BASIK</div>
+            <div><strong>BASIK Men's Wear</strong></div>
+          </div>
+        </div>
+      </body>
+    </html>
+  `;
+
+  const printWindow = window.open("", "_blank");
+  if (!printWindow) return;
+  printWindow.document.write(html);
+  printWindow.document.close();
+  printWindow.focus();
+  printWindow.print();
+};
+
 export default function OrdersPage() {
-  const { data: orders, isLoading, refetch: refetchOrders } = useOrders();
+  const { data: orders, isLoading } = useOrders();
   const { data: products } = useProducts();
   const createOrder = useCreateOrder();
   const updateOrder = useUpdateOrder();
+  const { data: shippingCities } = useShippingCities();
   const { token } = useAuth();
 
   const [searchQuery, setSearchQuery] = useState("");
@@ -92,6 +270,7 @@ export default function OrdersPage() {
     notes: "",
     shipped_with_courier: false,
     source: "",
+    shipping_city_id: "",
     discount: "",
   });
   const [items, setItems] = useState<any[]>([]);
@@ -118,20 +297,24 @@ export default function OrdersPage() {
 
   const handleAddItem = () => {
     if (!newItem.product_id || !newItem.size || !newItem.quantity) return;
-    const qty = parseInt(newItem.quantity);
+    const qty = parseInt(newItem.quantity, 10);
+    if (!Number.isInteger(qty) || qty < 1) {
+      alert("الكمية يجب أن تكون 1 أو أكثر");
+      return;
+    }
     const variant = variants.find((v) => v.size === newItem.size);
     if (!variant || variant.quantity < qty) {
       alert(`الكمية غير كافية للمقاس ${newItem.size}`);
       return;
     }
     const product = products?.find(
-      (p: any) => p.id === parseInt(newItem.product_id),
+      (p: any) => p.id === parseInt(newItem.product_id, 10),
     );
     if (!product) return;
     setItems([
       ...items,
       {
-        product_id: parseInt(newItem.product_id),
+        product_id: parseInt(newItem.product_id, 10),
         size: newItem.size,
         quantity: qty,
         price_at_sale: product.selling_price,
@@ -156,6 +339,10 @@ export default function OrdersPage() {
         notes: formData.notes,
         shipped_with_courier: formData.shipped_with_courier,
         source: formData.source || null,
+        shipping_city_id:
+          formData.shipping_city_id !== ""
+            ? Number(formData.shipping_city_id)
+            : null,
         discount: discountAmount || 0,
         items,
         token,
@@ -167,6 +354,7 @@ export default function OrdersPage() {
         notes: "",
         shipped_with_courier: false,
         source: "",
+        shipping_city_id: "",
         discount: "",
       });
       setItems([]);
@@ -483,6 +671,15 @@ export default function OrdersPage() {
                           <Truck className="w-2.5 h-2.5" /> شحن
                         </Badge>
                       )}
+                      {order.shipping_city && (
+                        <Badge
+                          variant="outline"
+                          className="text-[10px] border-amber-500/30 text-amber-300 gap-1"
+                        >
+                          {order.shipping_city.city_name} ·{" "}
+                          {fmt(order.shipping_city.shipping_fee)} EGP
+                        </Badge>
+                      )}
                       {order.source &&
                         SOURCE_CONFIG[order.source as SourceKey] && (
                           <Badge
@@ -496,6 +693,17 @@ export default function OrdersPage() {
                         )}
                     </div>
                   </div>
+                </div>
+
+                <div className="flex flex-wrap items-center justify-end gap-2 mb-3">
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => printInvoice(order)}
+                    className="text-[11px] px-3 py-2"
+                  >
+                    طباعة الفاتورة
+                  </Button>
                 </div>
 
                 {order.order_items?.length > 0 && (
@@ -633,6 +841,34 @@ export default function OrdersPage() {
               </div>
 
               <div className="space-y-1.5">
+                <Label className="text-zinc-400 text-xs">مدينة الشحن</Label>
+                <Select
+                  value={formData.shipping_city_id}
+                  onValueChange={(value) =>
+                    setFormData({ ...formData, shipping_city_id: value })
+                  }
+                >
+                  <SelectTrigger className="h-14 bg-zinc-900 border-zinc-700 text-zinc-200 text-base disabled:opacity-40 w-full">
+                    <SelectValue placeholder="اختر المدينة" />
+                  </SelectTrigger>
+                  <SelectContent className="bg-zinc-900 border-zinc-700">
+                    <SelectItem value="">بدون شحن</SelectItem>
+                    {Array.isArray(shippingCities)
+                      ? shippingCities.map((city: any) => (
+                          <SelectItem
+                            key={city.id}
+                            value={String(city.id)}
+                            className="text-zinc-200"
+                          >
+                            {city.city_name} · {fmt(city.shipping_fee)} EGP
+                          </SelectItem>
+                        ))
+                      : null}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-1.5">
                 <Label className="text-zinc-400 text-xs">خصم (EGP)</Label>
                 <Input
                   type="number"
@@ -747,13 +983,13 @@ export default function OrdersPage() {
                     <Input
                       type="number"
                       min="1"
-                      placeholder="0"
+                      placeholder="1"
                       value={newItem.quantity}
                       disabled={!newItem.size}
                       onChange={(e) =>
                         setNewItem({
                           ...newItem,
-                          quantity: e.target.value,
+                          quantity: e.target.value.replace(/^0+/, ""),
                         })
                       }
                       className="h-10 bg-zinc-900 border-zinc-700 text-white disabled:opacity-40"

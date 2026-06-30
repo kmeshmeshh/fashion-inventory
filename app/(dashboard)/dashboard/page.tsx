@@ -21,7 +21,6 @@ import { Skeleton } from "@/components/ui/skeleton";
 import {
   TrendingUp,
   TrendingDown,
-  DollarSign,
   Package,
   ShoppingCart,
   BarChart3,
@@ -243,7 +242,9 @@ export default function DashboardPage() {
   const totalPurchaseCost = analytics.totalPurchaseCost ?? 0;
   const totalSpending = analytics.totalSpending ?? 0;
   const netProfit = analytics.netProfit ?? 0;
+  const cashFlow = analytics.cashFlow ?? 0;
   const totalOrders = analytics.totalOrders ?? 0;
+  const deliveredOrders = analytics.deliveredOrdersCount ?? 0;
 
   const revenueSummaryData = [
     {
@@ -255,7 +256,8 @@ export default function DashboardPage() {
     },
   ];
 
-  const avgOrderValue = totalOrders > 0 ? totalRevenue / totalOrders : 0;
+  const avgOrderValue =
+    deliveredOrders > 0 ? totalRevenue / deliveredOrders : 0;
   const profitMargin = totalRevenue > 0 ? (netProfit / totalRevenue) * 100 : 0;
   const expenseRatio =
     totalRevenue > 0 ? (totalSpending / totalRevenue) * 100 : 0;
@@ -284,29 +286,55 @@ export default function DashboardPage() {
         }`}
       >
         <CardContent className="p-5 md:p-6">
-          <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
-            <div>
-              <p className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-2">
-                الربح الصافي
-              </p>
-              <div className="flex items-baseline gap-2">
-                <span
-                  className={`text-4xl md:text-5xl font-bold tracking-tight tabular-nums ${
-                    isProfitable ? "text-violet-300" : "text-red-400"
-                  }`}
-                >
-                  {fmt(netProfit)}
-                </span>
-                <span className="text-zinc-500 text-sm font-medium">EGP</span>
+          <div className="flex flex-col md:flex-row md:items-end justify-between gap-5">
+            <div className="flex flex-col sm:flex-row gap-6 sm:gap-10">
+              <div>
+                <p className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-2">
+                  الربح الصافي
+                </p>
+                <div className="flex items-baseline gap-2">
+                  <span
+                    className={`text-4xl md:text-5xl font-bold tracking-tight tabular-nums ${
+                      isProfitable ? "text-violet-300" : "text-red-400"
+                    }`}
+                  >
+                    {fmt(netProfit)}
+                  </span>
+                  <span className="text-zinc-500 text-sm font-medium">EGP</span>
+                </div>
+                <p className="text-xs text-zinc-500 mt-2 flex items-center gap-1.5">
+                  {isProfitable ? (
+                    <TrendingUp className="w-3.5 h-3.5 text-emerald-500" />
+                  ) : (
+                    <TrendingDown className="w-3.5 h-3.5 text-red-500" />
+                  )}
+                  هامش ربح {profitMargin.toFixed(1)}% من إجمالي الإيرادات
+                </p>
+                <p className="text-[11px] text-zinc-600 mt-1.5 max-w-xs leading-snug">
+                  إيه اللي فضل معاك بعد ما بعت وصرفت، من غير البضاعة اللي لسه
+                  قاعدة
+                </p>
               </div>
-              <p className="text-xs text-zinc-500 mt-2 flex items-center gap-1.5">
-                {isProfitable ? (
-                  <TrendingUp className="w-3.5 h-3.5 text-emerald-500" />
-                ) : (
-                  <TrendingDown className="w-3.5 h-3.5 text-red-500" />
-                )}
-                هامش ربح {profitMargin.toFixed(1)}% من إجمالي الإيرادات
-              </p>
+
+              <div className="border-t sm:border-t-0 sm:border-s border-zinc-800 pt-4 sm:pt-0 sm:ps-8">
+                <p className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-2">
+                  صافي التدفق النقدي
+                </p>
+                <div className="flex items-baseline gap-2">
+                  <span
+                    className={`text-2xl md:text-3xl font-bold tracking-tight tabular-nums ${
+                      cashFlow >= 0 ? "text-emerald-400" : "text-red-400"
+                    }`}
+                  >
+                    {fmt(cashFlow)}
+                  </span>
+                  <span className="text-zinc-500 text-sm font-medium">EGP</span>
+                </div>
+                <p className="text-[11px] text-zinc-600 mt-1.5 max-w-xs leading-snug">
+                  كل الفلوس اللي خرجت فعليًا من جيبك (بضاعة لسه في المخزن +
+                  مباعة + مصاريف) مقابل اللي دخلت
+                </p>
+              </div>
             </div>
 
             <div className="grid grid-cols-3 gap-4 md:gap-6 md:text-right shrink-0">
@@ -336,7 +364,7 @@ export default function DashboardPage() {
       </Card>
 
       {/* Consolidated KPI Cards — one row, no duplication/overlap */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3">
         <KPICard
           title="الدخل المتوقع"
           value={fmt(expectedIncome)}
@@ -355,9 +383,16 @@ export default function DashboardPage() {
         <KPICard
           title="متوسط قيمة الطلب"
           value={fmt(avgOrderValue)}
-          sub={`${totalOrders} طلب مُسلَّم`}
+          sub={`${deliveredOrders} طلب مُسلَّم`}
           icon={Package}
           color="text-indigo-400"
+        />
+        <KPICard
+          title="عدد الطلبات"
+          value={fmt(totalOrders)}
+          sub="إجمالي الطلبات في الفترة"
+          icon={BarChart3}
+          color="text-cyan-400"
         />
         <KPICard
           title="إجمالي المصروفات"

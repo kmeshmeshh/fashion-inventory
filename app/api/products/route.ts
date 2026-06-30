@@ -1,3 +1,4 @@
+import { createProductSchema } from "@/lib/apiTypes";
 import { supabaseServer } from "@/lib/supabase";
 import { NextRequest, NextResponse } from "next/server";
 
@@ -39,41 +40,36 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { sku, name, cost_per_unit, selling_price } = body;
+    const parseResult = createProductSchema.safeParse(body);
 
-    if (
-      !sku ||
-      !name ||
-      cost_per_unit === undefined ||
-      selling_price === undefined
-    ) {
+    if (!parseResult.success) {
       return NextResponse.json(
         {
-          error:
-            "Missing required fields: sku, name, cost_per_unit, selling_price",
+          error: parseResult.error.issues
+            .map((issue) => `${issue.path.join(".")}: ${issue.message}`)
+            .join(", "),
         },
         { status: 400 },
       );
     }
 
+    const product = parseResult.data;
     const supabase = supabaseServer();
 
     const { data, error } = await supabase
       .from("products")
       .insert([
         {
-          sku,
-          name,
-          cost_per_unit: parseFloat(String(cost_per_unit)),
-          selling_price: parseFloat(String(selling_price)),
+          ...product,
           current_stock: 0,
         },
       ])
-      .select();
+      .select()
+      .single();
 
     if (error) throw error;
 
-    return NextResponse.json(data[0], { status: 201 });
+    return NextResponse.json(data, { status: 201 });
   } catch (error) {
     console.error("POST products error:", error);
     return NextResponse.json(

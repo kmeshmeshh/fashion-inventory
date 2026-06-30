@@ -1,8 +1,14 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
 "use client";
 
 import { useMemo, useState } from "react";
-import { useProducts, useCreateProduct } from "@/hooks/useProducts";
+import {
+  useProducts,
+  useCreateProduct,
+  useUpdateProduct,
+  useDeleteProduct,
+  useUpsertProductVariant,
+} from "@/hooks/useProducts";
+import { Product, ProductVariant } from "@/lib/types";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -35,11 +41,25 @@ import {
   Boxes,
   AlertTriangle,
   TrendingUp,
+  DollarSign,
+  Percent,
+  Layers,
 } from "lucide-react";
 
-const SIZES = ["XS", "S", "M", "L", "XL", "XXL"];
-const defaultSizes = { XS: 0, S: 0, M: 0, L: 0, XL: 0, XXL: 0 };
+const SIZES = ["XS", "S", "M", "L", "XL", "XXL"] as const;
+const defaultSizes: Record<(typeof SIZES)[number], number> = {
+  XS: 0,
+  S: 0,
+  M: 0,
+  L: 0,
+  XL: 0,
+  XXL: 0,
+};
 const LOW_STOCK_THRESHOLD = 5;
+
+type ProductWithVariants = Product & {
+  product_variants?: ProductVariant[];
+};
 
 const fmt = (n: number) =>
   new Intl.NumberFormat("ar-EG", { maximumFractionDigits: 0 }).format(n);
@@ -47,6 +67,9 @@ const fmt = (n: number) =>
 export default function InventoryPage() {
   const { data: products, isLoading, refetch } = useProducts();
   const createProduct = useCreateProduct();
+  const updateProduct = useUpdateProduct();
+  const deleteProduct = useDeleteProduct();
+  const upsertProductVariant = useUpsertProductVariant();
 
   const [sheetOpen, setSheetOpen] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
@@ -61,11 +84,8 @@ export default function InventoryPage() {
   });
   const [sizes, setSizes] = useState<typeof defaultSizes>({ ...defaultSizes });
 
-  const totalStock = (product: any) =>
-    product.product_variants?.reduce(
-      (s: number, v: any) => s + v.quantity,
-      0,
-    ) || 0;
+  const totalStock = (product: ProductWithVariants) =>
+    product.product_variants?.reduce((s, v) => s + v.quantity, 0) || 0;
 
   const openAdd = () => {
     setEditingId(null);
@@ -74,7 +94,7 @@ export default function InventoryPage() {
     setSheetOpen(true);
   };
 
-  const openEdit = (product: any) => {
+  const openEdit = (product: ProductWithVariants) => {
     setEditingId(product.id);
     setFormData({
       sku: product.sku,
@@ -82,9 +102,9 @@ export default function InventoryPage() {
       cost_per_unit: product.cost_per_unit.toString(),
       selling_price: product.selling_price.toString(),
     });
-    const sizesMap: any = { ...defaultSizes };
-    product.product_variants?.forEach((v: any) => {
-      sizesMap[v.size] = v.quantity;
+    const sizesMap = { ...defaultSizes };
+    product.product_variants?.forEach((v) => {
+      sizesMap[v.size as keyof typeof sizesMap] = v.quantity;
     });
     setSizes(sizesMap);
     setSheetOpen(true);
@@ -92,107 +112,144 @@ export default function InventoryPage() {
 
   const handleDelete = async (id: number) => {
     try {
-      const res = await fetch(`/api/products/${id}`, { method: "DELETE" });
-      if (!res.ok) throw new Error();
+      await deleteProduct.mutateAsync(id);
       await refetch();
-    } catch {
-      alert("❌ خطأ في الحذف");
+    } catch (error) {
+      alert(
+        `❌ خطأ في الحذف: ${error instanceof Error ? error.message : "خطأ"}`,
+      );
     }
   };
 
   const handleSubmit = async () => {
     setLoading(true);
     try {
+      const payload = {
+        sku: formData.sku,
+        name: formData.name,
+        cost_per_unit: parseFloat(formData.cost_per_unit),
+        selling_price: parseFloat(formData.selling_price),
+      };
+
       if (editingId) {
-        const res = await fetch(`/api/products/${editingId}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            sku: formData.sku,
-            name: formData.name,
-            cost_per_unit: parseFloat(formData.cost_per_unit),
-            selling_price: parseFloat(formData.selling_price),
-          }),
-        });
-        if (!res.ok) throw new Error();
-        for (const [size, qty] of Object.entries(sizes)) {
-          if (qty > 0) {
-            await fetch(`/api/products/${editingId}/variants`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ size, quantity: qty }),
+        await updateProduct.mutateAsync({ id: editingId, ...payload });
+        const product = products?.find((p: any) => p.id === editingId);
+        const existingVariantSizes = new Set(
+          product?.product_variants?.map((variant) => variant.size) || [],
+        );
+
+        for (const [size, qty] of Object.entries(sizes) as [string, number][]) {
+          if (qty > 0 || existingVariantSizes.has(size)) {
+            await upsertProductVariant.mutateAsync({
+              productId: editingId,
+              size,
+              quantity: qty,
             });
           }
         }
       } else {
-        const productRes = await fetch("/api/products", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            sku: formData.sku,
-            name: formData.name,
-            cost_per_unit: parseFloat(formData.cost_per_unit),
-            selling_price: parseFloat(formData.selling_price),
-          }),
-        });
-        if (!productRes.ok) throw new Error();
-        const product = await productRes.json();
+        const product = await createProduct.mutateAsync(payload);
         if (product?.id) {
-          for (const [size, qty] of Object.entries(sizes)) {
+          for (const [size, qty] of Object.entries(sizes) as [
+            string,
+            number,
+          ][]) {
             if (qty > 0) {
-              await fetch(`/api/products/${product.id}/variants`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ size, quantity: qty }),
+              await upsertProductVariant.mutateAsync({
+                productId: product.id,
+                size,
+                quantity: qty,
               });
             }
           }
         }
       }
+
       setSheetOpen(false);
       await refetch();
-    } catch {
-      alert("❌ خطأ");
+    } catch (error) {
+      alert(`❌ ${error instanceof Error ? error.message : "خطأ"}`);
     } finally {
       setLoading(false);
     }
   };
 
   // Stats
-  const totalProducts = products?.length || 0;
-  const totalUnits = (products || []).reduce(
-    (s: number, p: any) => s + totalStock(p),
-    0,
-  );
-  const lowStockProducts = (products || []).filter((p: any) => {
-    const t = totalStock(p);
-    return t > 0 && t <= LOW_STOCK_THRESHOLD;
-  });
-  const outOfStockProducts = (products || []).filter(
-    (p: any) => totalStock(p) === 0,
-  );
-  const inventoryValue = (products || []).reduce(
-    (s: number, p: any) => s + totalStock(p) * (p.selling_price || 0),
-    0,
-  );
+  const {
+    totalProducts,
+    totalUnits,
+    totalVariants,
+    lowStockCount,
+    outOfStockCount,
+    inventoryValue,
+    averageMargin,
+  } = useMemo(() => {
+    const productList = products || [];
+    const totals = productList.reduce(
+      (acc, product) => {
+        const stock = totalStock(product);
+        const margin =
+          product.selling_price > 0
+            ? ((product.selling_price - product.cost_per_unit) /
+                product.selling_price) *
+              100
+            : 0;
+
+        acc.totalUnits += stock;
+        acc.totalVariants += product.product_variants?.length || 0;
+        acc.inventoryValue += stock * (product.selling_price || 0);
+        acc.marginSum += margin;
+        acc.marginCount += product.selling_price > 0 ? 1 : 0;
+
+        if (stock > 0 && stock <= LOW_STOCK_THRESHOLD) {
+          acc.lowStockCount += 1;
+        }
+        if (stock === 0) {
+          acc.outOfStockCount += 1;
+        }
+
+        return acc;
+      },
+      {
+        totalUnits: 0,
+        totalVariants: 0,
+        lowStockCount: 0,
+        outOfStockCount: 0,
+        inventoryValue: 0,
+        marginSum: 0,
+        marginCount: 0,
+      },
+    );
+
+    return {
+      totalProducts: productList.length,
+      totalUnits: totals.totalUnits,
+      totalVariants: totals.totalVariants,
+      lowStockCount: totals.lowStockCount,
+      outOfStockCount: totals.outOfStockCount,
+      inventoryValue: totals.inventoryValue,
+      averageMargin:
+        totals.marginCount > 0 ? totals.marginSum / totals.marginCount : 0,
+    };
+  }, [products]);
 
   const filteredProducts = useMemo(() => {
     let list = products || [];
     const q = searchQuery.trim().toLowerCase();
     if (q) {
       list = list.filter(
-        (p: any) =>
+        (p) =>
           p.name?.toLowerCase().includes(q) || p.sku?.toLowerCase().includes(q),
       );
     }
     if (stockFilter === "low") {
-      list = list.filter((p: any) => {
+      list = list.filter((p) => {
         const t = totalStock(p);
         return t > 0 && t <= LOW_STOCK_THRESHOLD;
       });
     }
     if (stockFilter === "out") {
-      list = list.filter((p: any) => totalStock(p) === 0);
+      list = list.filter((p) => totalStock(p) === 0);
     }
     return list;
   }, [products, searchQuery, stockFilter]);
@@ -218,7 +275,7 @@ export default function InventoryPage() {
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 xl:grid-cols-3 gap-3">
         <Card className="bg-zinc-900 border-zinc-800">
           <CardContent className="p-4">
             <div className="flex items-center justify-between">
@@ -251,6 +308,38 @@ export default function InventoryPage() {
           </CardContent>
         </Card>
 
+        <Card className="bg-zinc-900 border-zinc-800">
+          <CardContent className="p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-[11px] text-zinc-500">إجمالي الأحجام</p>
+                <p className="text-xl font-bold text-white tabular-nums">
+                  {totalVariants}
+                </p>
+              </div>
+              <div className="p-2 rounded-lg bg-zinc-800">
+                <Layers className="w-4 h-4 text-cyan-400" />
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="bg-zinc-900 border-zinc-800">
+          <CardContent className="p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-[11px] text-zinc-500">قيمة المخزون</p>
+                <p className="text-xl font-bold text-emerald-400 tabular-nums">
+                  {fmt(inventoryValue)}
+                </p>
+              </div>
+              <div className="p-2 rounded-lg bg-emerald-500/10">
+                <TrendingUp className="w-4 h-4 text-emerald-400" />
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
         <Card
           role="button"
           onClick={() => setStockFilter(stockFilter === "low" ? "all" : "low")}
@@ -265,7 +354,7 @@ export default function InventoryPage() {
               <div>
                 <p className="text-[11px] text-zinc-500">مخزون منخفض</p>
                 <p className="text-xl font-bold text-amber-400 tabular-nums">
-                  {lowStockProducts.length}
+                  {lowStockCount}
                 </p>
               </div>
               <div className="p-2 rounded-lg bg-amber-500/10">
@@ -279,13 +368,29 @@ export default function InventoryPage() {
           <CardContent className="p-4">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-[11px] text-zinc-500">قيمة المخزون</p>
-                <p className="text-lg font-bold text-emerald-400 tabular-nums">
-                  {fmt(inventoryValue)}
+                <p className="text-[11px] text-zinc-500">المنتجات النافدة</p>
+                <p className="text-xl font-bold text-red-400 tabular-nums">
+                  {outOfStockCount}
                 </p>
               </div>
-              <div className="p-2 rounded-lg bg-emerald-500/10">
-                <TrendingUp className="w-4 h-4 text-emerald-400" />
+              <div className="p-2 rounded-lg bg-red-500/10">
+                <DollarSign className="w-4 h-4 text-red-400" />
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="bg-zinc-900 border-zinc-800">
+          <CardContent className="p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-[11px] text-zinc-500">متوسط هامش الربح</p>
+                <p className="text-xl font-bold text-white tabular-nums">
+                  {averageMargin.toFixed(0)}%
+                </p>
+              </div>
+              <div className="p-2 rounded-lg bg-zinc-800">
+                <Percent className="w-4 h-4 text-emerald-400" />
               </div>
             </div>
           </CardContent>
@@ -306,14 +411,16 @@ export default function InventoryPage() {
               />
             </div>
             <div className="flex gap-2 shrink-0">
-              {[
-                { key: "all", label: "الكل" },
-                { key: "low", label: "منخفض" },
-                { key: "out", label: "نافد" },
-              ].map((f) => (
+              {(
+                [
+                  { key: "all", label: "الكل" },
+                  { key: "low", label: "منخفض" },
+                  { key: "out", label: "نافد" },
+                ] as const
+              ).map((f) => (
                 <button
                   key={f.key}
-                  onClick={() => setStockFilter(f.key as any)}
+                  onClick={() => setStockFilter(f.key)}
                   className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
                     stockFilter === f.key
                       ? "bg-indigo-600 text-white"
@@ -356,7 +463,7 @@ export default function InventoryPage() {
         </div>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-          {filteredProducts.map((product: any) => {
+          {filteredProducts.map((product: ProductWithVariants) => {
             const stock = totalStock(product);
             const isLow = stock > 0 && stock <= LOW_STOCK_THRESHOLD;
             const isOut = stock === 0;
@@ -475,7 +582,7 @@ export default function InventoryPage() {
                       </Badge>
                     </div>
                     <div className="flex flex-wrap gap-1">
-                      {product.product_variants?.map((v: any) => (
+                      {product.product_variants?.map((v) => (
                         <div
                           key={v.id}
                           className={`px-2 py-1 rounded text-[10px] font-medium text-center ${

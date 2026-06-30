@@ -1,6 +1,62 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
+import { createOrderSchema } from "@/lib/apiTypes";
 import { supabaseServer } from "@/lib/supabase";
 import { NextRequest, NextResponse } from "next/server";
+
+async function rollbackOrder(
+  supabase: ReturnType<typeof supabaseServer>,
+  orderId: number,
+  variantInventory?: Map<string, number>,
+) {
+  if (variantInventory && variantInventory.size) {
+    for (const [key, originalQuantity] of variantInventory) {
+      const [product_id, size] = key.split("-");
+      await supabase
+        .from("product_variants")
+        .update({ quantity: originalQuantity })
+        .eq("product_id", Number(product_id))
+        .eq("size", size);
+    }
+
+    const productIds = new Set<number>();
+    for (const key of variantInventory.keys()) {
+      const [product_id] = key.split("-");
+      productIds.add(Number(product_id));
+    }
+
+    for (const productId of productIds) {
+      const { data: variants, error: variantError } = await supabase
+        .from("product_variants")
+        .select("quantity")
+        .eq("product_id", productId);
+
+      if (variantError) {
+        console.error(
+          "rollbackOrder: failed to refresh product stock",
+          variantError,
+        );
+        continue;
+      }
+
+      const totalStock = (variants || []).reduce(
+        (sum, variant) => sum + (variant.quantity ?? 0),
+        0,
+      );
+
+      await supabase
+        .from("products")
+        .update({ current_stock: totalStock })
+        .eq("id", productId);
+    }
+  }
+
+  await supabase.from("order_items").delete().eq("order_id", orderId);
+  await supabase
+    .from("inventory_logs")
+    .delete()
+    .eq("reference_id", orderId)
+    .eq("reason", "order");
+  await supabase.from("orders").delete().eq("id", orderId);
+}
 
 export async function GET(request: NextRequest) {
   try {
@@ -14,6 +70,11 @@ export async function GET(request: NextRequest) {
         order_items (
           *,
           products (*)
+        ),
+        shipping_city:shipping_cities (
+          id,
+          city_name,
+          shipping_fee
         )
       `,
       )
@@ -35,6 +96,19 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
+    const parseResult = createOrderSchema.safeParse(body);
+
+    if (!parseResult.success) {
+      return NextResponse.json(
+        {
+          error: parseResult.error.issues
+            .map((issue) => `${issue.path.join(".")}: ${issue.message}`)
+            .join(", "),
+        },
+        { status: 400 },
+      );
+    }
+
     const {
       customer_name,
       customer_phone,
@@ -43,8 +117,9 @@ export async function POST(request: NextRequest) {
       notes,
       shipped_with_courier,
       source,
+      shipping_city_id,
       discount,
-    } = body;
+    } = parseResult.data;
 
     const authHeader = request.headers.get("authorization");
     if (!authHeader?.startsWith("Bearer ")) {
@@ -63,7 +138,6 @@ export async function POST(request: NextRequest) {
 
     const supabase = supabaseServer();
 
-    // 0. Find or create customer by phone
     let customerId: number | null = null;
     if (customer_phone) {
       const { data: existingCustomer, error: findCustomerError } =
@@ -102,15 +176,15 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // 1. Validate inventory
     for (const item of items) {
-      const { data: variant } = await supabase
+      const { data: variant, error: variantError } = await supabase
         .from("product_variants")
-        .select("quantity")
+        .select("id, quantity")
         .eq("product_id", item.product_id)
         .eq("size", item.size)
-        .single();
+        .maybeSingle();
 
+      if (variantError) throw variantError;
       if (!variant || variant.quantity < item.quantity) {
         return NextResponse.json(
           { error: `Insufficient stock for size ${item.size}` },
@@ -119,22 +193,20 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // 2. Generate order number
     const { count } = await supabase
       .from("orders")
       .select("*", { count: "exact", head: true });
 
     const order_number = `ORD-${String((count || 0) + 1).padStart(4, "0")}`;
 
-    let subtotal = 0;
-    for (const item of items) {
-      subtotal += item.quantity * item.price_at_sale;
-    }
+    const subtotal = items.reduce(
+      (sum, item) => sum + item.quantity * item.price_at_sale,
+      0,
+    );
 
     const discountAmount = Number(discount) || 0;
     const total_price = Math.max(0, subtotal - discountAmount);
 
-    // 3. Create order
     const { data: orderData, error: orderError } = await supabase
       .from("orders")
       .insert([
@@ -147,20 +219,21 @@ export async function POST(request: NextRequest) {
           total_price,
           discount: discountAmount,
           source: source || null,
+          shipping_city_id: shipping_city_id || null,
           notes,
           shipped_with_courier,
           created_by: user.id,
           status: "pending",
         },
       ])
-      .select();
+      .select()
+      .single();
 
     if (orderError) throw orderError;
 
-    const orderId = orderData[0].id;
+    const orderId = orderData.id;
 
-    // 4. Create order items
-    const orderItems = items.map((item: any) => ({
+    const orderItems = items.map((item) => ({
       order_id: orderId,
       product_id: item.product_id,
       quantity: item.quantity,
@@ -173,32 +246,95 @@ export async function POST(request: NextRequest) {
       .from("order_items")
       .insert(orderItems);
 
-    if (itemsError) throw itemsError;
+    if (itemsError) {
+      await rollbackOrder(supabase, orderId);
+      throw itemsError;
+    }
 
-    // 5. DEDUCT FROM INVENTORY
+    const variantInventory = new Map<string, number>();
     for (const item of items) {
-      const { data: currentVariant } = await supabase
+      const { data: variant, error: variantError } = await supabase
         .from("product_variants")
-        .select("quantity")
+        .select("id, quantity")
         .eq("product_id", item.product_id)
         .eq("size", item.size)
-        .single();
+        .maybeSingle();
 
-      const newQuantity = (currentVariant?.quantity || 0) - item.quantity;
+      if (variantError) throw variantError;
+      if (!variant) {
+        await rollbackOrder(supabase, orderId);
+        throw new Error(`Variant not found for size ${item.size}`);
+      }
 
-      const { error: updateError } = await supabase
+      variantInventory.set(`${item.product_id}-${item.size}`, variant.quantity);
+    }
+
+    const productIds = new Set<number>();
+    for (const item of items) {
+      const currentQuantity =
+        variantInventory.get(`${item.product_id}-${item.size}`) ?? 0;
+      const newQuantity = currentQuantity - item.quantity;
+
+      const { data: updatedVariant, error: updateError } = await supabase
         .from("product_variants")
         .update({ quantity: newQuantity })
         .eq("product_id", item.product_id)
-        .eq("size", item.size);
+        .eq("size", item.size)
+        .gte("quantity", item.quantity)
+        .select()
+        .single();
 
-      if (updateError) {
-        await supabase.from("orders").delete().eq("id", orderId);
-        throw new Error("Failed to deduct inventory");
+      if (updateError || !updatedVariant) {
+        await rollbackOrder(supabase, orderId);
+        throw new Error(`Failed to deduct inventory for ${item.size}`);
+      }
+
+      productIds.add(item.product_id);
+
+      const { error: logError } = await supabase.from("inventory_logs").insert([
+        {
+          product_id: item.product_id,
+          quantity_changed: -item.quantity,
+          reason: "order",
+          reference_id: orderId,
+          created_by: user.id,
+        },
+      ]);
+
+      if (logError) {
+        await rollbackOrder(supabase, orderId);
+        throw logError;
       }
     }
 
-    return NextResponse.json(orderData[0], { status: 201 });
+    for (const productId of productIds) {
+      const { data: variants, error: variantError } = await supabase
+        .from("product_variants")
+        .select("quantity")
+        .eq("product_id", productId);
+
+      if (variantError) {
+        await rollbackOrder(supabase, orderId);
+        throw variantError;
+      }
+
+      const totalStock = (variants || []).reduce(
+        (sum, variant) => sum + (variant.quantity ?? 0),
+        0,
+      );
+
+      const { error: updateError } = await supabase
+        .from("products")
+        .update({ current_stock: totalStock })
+        .eq("id", productId);
+
+      if (updateError) {
+        await rollbackOrder(supabase, orderId);
+        throw updateError;
+      }
+    }
+
+    return NextResponse.json(orderData, { status: 201 });
   } catch (error) {
     console.error("Order error:", error);
     return NextResponse.json(

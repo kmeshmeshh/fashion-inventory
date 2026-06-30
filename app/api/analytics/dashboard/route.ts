@@ -60,7 +60,7 @@ export async function GET(request: NextRequest) {
     const totalRevenue =
       deliveredOrders.reduce((sum, o) => sum + (o.total_price || 0), 0) || 0;
 
-    const totalOrders = deliveredOrders.length;
+    const deliveredOrdersCount = deliveredOrders.length;
 
     const expectedIncome =
       allOrders
@@ -73,6 +73,9 @@ export async function GET(request: NextRequest) {
         .reduce((sum, o) => sum + (o.total_price || 0), 0) || 0;
 
     const allOrdersCount = allOrders?.length || 0;
+    const allOrdersTotal =
+      allOrders?.reduce((sum, o) => sum + (o.total_price || 0), 0) || 0;
+    const totalOrders = allOrdersCount;
 
     // Get expenses
     const { data: expenses, error: expensesError } = await supabase
@@ -134,6 +137,12 @@ export async function GET(request: NextRequest) {
     const totalPurchaseCost = remainingStockValue + totalCOGS;
     const totalSpending = totalPurchaseCost + totalExpenses;
 
+    // Cash flow = actual money in vs money out, counting the FULL cost of inventory bought
+    // (sold + still on shelf) and expenses. Different from netProfit, which only counts
+    // the cost of inventory that has actually been sold. This answers "did more money
+    // leave my pocket than entered it, overall" rather than "did my sales turn a profit".
+    const cashFlow = totalRevenue - totalSpending;
+
     // Best sellers (delivered only)
     const { data: bestSellers } = await supabase
       .from("order_items")
@@ -170,11 +179,14 @@ export async function GET(request: NextRequest) {
       totalExpenses: Math.round(totalExpenses * 100) / 100,
       totalCOGS: Math.round(totalCOGS * 100) / 100,
       netProfit: Math.round(netProfit * 100) / 100,
+      cashFlow: Math.round(cashFlow * 100) / 100,
       remainingStockValue: Math.round(remainingStockValue * 100) / 100,
       totalPurchaseCost: Math.round(totalPurchaseCost * 100) / 100,
       totalSpending: Math.round(totalSpending * 100) / 100,
       totalOrders,
+      deliveredOrdersCount,
       allOrdersCount,
+      allOrdersTotal: Math.round(allOrdersTotal * 100) / 100,
       bestSellers:
         bestSellers?.map((item: any) => ({
           name: item.products?.name || "Unknown",

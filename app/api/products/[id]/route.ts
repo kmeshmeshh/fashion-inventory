@@ -1,3 +1,4 @@
+import { updateProductSchema } from "@/lib/apiTypes";
 import { supabaseServer } from "@/lib/supabase";
 import { NextRequest, NextResponse } from "next/server";
 
@@ -64,17 +65,39 @@ export async function PATCH(
       );
     }
 
+    const parseResult = updateProductSchema.safeParse(body);
+
+    if (!parseResult.success) {
+      return NextResponse.json(
+        {
+          error: parseResult.error.issues
+            .map((issue) => `${issue.path.join(".")}: ${issue.message}`)
+            .join(", "),
+        },
+        { status: 400 },
+      );
+    }
+
+    const updateData = parseResult.data;
+    if (!Object.keys(updateData).length) {
+      return NextResponse.json(
+        { error: "At least one product field must be provided for update." },
+        { status: 400 },
+      );
+    }
+
     const supabase = supabaseServer();
 
     const { data, error } = await supabase
       .from("products")
-      .update(body)
+      .update(updateData)
       .eq("id", productId)
-      .select();
+      .select()
+      .single();
 
     if (error) throw error;
 
-    return NextResponse.json(data[0]);
+    return NextResponse.json(data);
   } catch (error) {
     console.error("PATCH product error:", error);
     return NextResponse.json(

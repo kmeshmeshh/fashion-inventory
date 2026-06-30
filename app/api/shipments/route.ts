@@ -17,7 +17,11 @@ export async function GET(request: NextRequest) {
             order_number,
             customer_name,
             total_price,
-            status
+            status,
+            shipping_city:shipping_cities (
+              city_name,
+              shipping_fee
+            )
           )
         )
       `,
