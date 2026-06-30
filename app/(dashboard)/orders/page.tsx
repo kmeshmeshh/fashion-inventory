@@ -768,7 +768,7 @@ export default function OrdersPage() {
                         !newItem.size ||
                         !newItem.quantity
                       }
-                      className="w-full h-14 bg-indigo-600 hover:bg-indigo-500 text-base"
+                      className="w-full h-10 bg-indigo-600 hover:bg-indigo-500 text-base"
                     >
                       إضافة
                     </Button>
