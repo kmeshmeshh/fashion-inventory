@@ -116,18 +116,20 @@ export async function GET(request: NextRequest) {
 
     // Total purchase cost = cost of stock still on hand + cost of stock already sold (delivered)
     // This answers "how much money have I spent buying inventory in total", regardless of what's sold yet.
-    const { data: allProducts, error: productsError } = await supabase
-      .from("products")
-      .select("current_stock, cost_per_unit");
+    // NOTE: stock quantities live in `product_variants` (per size), not in `products.current_stock`
+    // (that column isn't kept in sync), so we read quantity from variants and join cost_per_unit
+    // from the parent product.
+    const { data: variants, error: variantsError } = await supabase
+      .from("product_variants")
+      .select("quantity, product_id, products(cost_per_unit)");
 
-    if (productsError) throw productsError;
+    if (variantsError) throw variantsError;
 
     const remainingStockValue =
-      allProducts?.reduce(
-        (sum: number, p: any) =>
-          sum + (p.current_stock || 0) * (p.cost_per_unit || 0),
-        0,
-      ) || 0;
+      variants?.reduce((sum: number, v: any) => {
+        const costPerUnit = v.products?.cost_per_unit || 0;
+        return sum + (v.quantity || 0) * costPerUnit;
+      }, 0) || 0;
 
     const totalPurchaseCost = remainingStockValue + totalCOGS;
     const totalSpending = totalPurchaseCost + totalExpenses;
