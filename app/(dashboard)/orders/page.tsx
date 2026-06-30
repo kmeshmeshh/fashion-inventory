@@ -1,11 +1,18 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useMemo } from "react";
 import { useOrders, useCreateOrder, useUpdateOrder } from "@/hooks/useOrders";
 import { useProducts } from "@/hooks/useProducts";
 import { useAuth } from "@/hooks/useAuth";
-import { Clock, CheckCircle2, Ban, ListTodo } from "lucide-react";
+import {
+  Clock,
+  CheckCircle2,
+  Ban,
+  ListTodo,
+  Search,
+  RotateCcw,
+} from "lucide-react";
 import {
   searchOrders,
   filterOrdersByStatus,
@@ -32,35 +39,38 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
-import { Plus, ShoppingCart, X, Truck } from "lucide-react";
+import { Plus, ShoppingCart, X, Truck, Package2, Link2 } from "lucide-react";
+import { FaFacebook, FaInstagram, FaWhatsapp } from "react-icons/fa";
 
-const ORDER_SOURCES = ["facebook", "instagram", "whatsapp", "other"];
+const ORDER_SOURCES = ["facebook", "instagram", "whatsapp", "other"] as const;
 
-const SOURCE_CONFIG: Record<
-  string,
-  { label: string; emoji: string; className: string }
-> = {
+const SOURCE_CONFIG = {
   facebook: {
     label: "فيسبوك",
-    emoji: "📘",
+    icon: FaFacebook,
     className: "bg-blue-500/10 text-blue-400 border-blue-500/20",
   },
   instagram: {
     label: "إنستاجرام",
-    emoji: "📸",
+    icon: FaInstagram,
     className: "bg-pink-500/10 text-pink-400 border-pink-500/20",
   },
   whatsapp: {
     label: "واتساب",
-    emoji: "💬",
+    icon: FaWhatsapp,
     className: "bg-emerald-500/10 text-emerald-400 border-emerald-500/20",
   },
   other: {
     label: "أخرى",
-    emoji: "🔗",
+    icon: Link2,
     className: "bg-zinc-500/10 text-zinc-400 border-zinc-500/20",
   },
-};
+} as const;
+
+// استخراج نوع (Type) به صورت خودکار
+type SourceKey = keyof typeof SOURCE_CONFIG;
+const fmt = (n: number) =>
+  new Intl.NumberFormat("ar-EG", { maximumFractionDigits: 0 }).format(n);
 
 export default function OrdersPage() {
   const { data: orders, isLoading, refetch: refetchOrders } = useOrders();
@@ -189,20 +199,57 @@ export default function OrdersPage() {
     filterEndDate,
   );
 
+  const hasActiveFilters =
+    searchQuery || filterStatus !== "all" || filterStartDate || filterEndDate;
+
   const orderStats = {
     total: orders?.length || 0,
-
     pending: orders?.filter((o: any) => o.status === "pending").length || 0,
-
     processing:
       orders?.filter(
         (o: any) => o.status === "prepared" || o.status === "shipped",
       ).length || 0,
-
     completed: orders?.filter((o: any) => o.status === "delivered").length || 0,
-
     cancelled: orders?.filter((o: any) => o.status === "cancelled").length || 0,
   };
+
+  const STAT_CARDS = [
+    {
+      key: "all",
+      label: "إجمالي الطلبات",
+      value: orderStats.total,
+      icon: ListTodo,
+      color: "text-indigo-400",
+    },
+    {
+      key: "pending",
+      label: "قيد الانتظار",
+      value: orderStats.pending,
+      icon: Clock,
+      color: "text-yellow-400",
+    },
+    {
+      key: "processing",
+      label: "معلقة",
+      value: orderStats.processing,
+      icon: Clock,
+      color: "text-orange-400",
+    },
+    {
+      key: "delivered",
+      label: "مكتملة",
+      value: orderStats.completed,
+      icon: CheckCircle2,
+      color: "text-emerald-400",
+    },
+    {
+      key: "cancelled",
+      label: "ملغية",
+      value: orderStats.cancelled,
+      icon: Ban,
+      color: "text-red-400",
+    },
+  ];
 
   return (
     <div className="space-y-6">
@@ -214,6 +261,7 @@ export default function OrdersPage() {
           </h1>
           <p className="text-zinc-500 text-sm mt-1">
             {filteredOrders.length} طلب
+            {hasActiveFilters && orders?.length ? ` من ${orders.length}` : ""}
           </p>
         </div>
         <Button
@@ -226,18 +274,50 @@ export default function OrdersPage() {
         </Button>
       </div>
 
+      {/* Stat Cards — tappable status filters */}
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+        {STAT_CARDS.map((s) => {
+          const Icon = s.icon;
+          const active =
+            s.key === "all" ? filterStatus === "all" : filterStatus === s.key;
+          return (
+            <Card
+              key={s.key}
+              role="button"
+              onClick={() => setFilterStatus(active ? "all" : s.key)}
+              className={`bg-zinc-900 cursor-pointer transition-colors ${
+                active && s.key !== "all"
+                  ? "border-indigo-500/50 ring-1 ring-indigo-500/30"
+                  : "border-zinc-800 hover:border-zinc-700"
+              }`}
+            >
+              <CardContent className="p-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-xs text-zinc-500">{s.label}</p>
+                    <p className={`text-2xl font-bold tabular-nums ${s.color}`}>
+                      {s.value}
+                    </p>
+                  </div>
+                  <Icon className={`w-5 h-5 ${s.color}`} />
+                </div>
+              </CardContent>
+            </Card>
+          );
+        })}
+      </div>
+
       {/* Search & Filters */}
       <Card className="bg-zinc-900 border-zinc-800">
         <CardContent className="p-4">
           <div className="grid grid-cols-1 md:grid-cols-5 gap-3 items-center">
-            {" "}
-            <div className="md:col-span-2">
-              {" "}
+            <div className="md:col-span-2 relative">
+              <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-600" />
               <Input
-                placeholder="🔍 بحث..."
+                placeholder="بحث برقم الطلب، اسم العميل، أو الهاتف..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="bg-zinc-800 border-zinc-700 text-white placeholder:text-zinc-600 text-sm"
+                className="bg-zinc-800 border-zinc-700 text-white placeholder:text-zinc-600 text-sm pr-9"
               />
             </div>
             <Select value={filterStatus} onValueChange={setFilterStatus}>
@@ -277,7 +357,8 @@ export default function OrdersPage() {
             <Button
               variant="outline"
               size="sm"
-              className="border-zinc-700 text-zinc-400 hover:bg-zinc-800 hover:text-white text-sm"
+              disabled={!hasActiveFilters}
+              className="border-zinc-700 text-zinc-400 hover:bg-zinc-800 hover:text-white text-sm gap-1.5 disabled:opacity-30"
               onClick={() => {
                 setSearchQuery("");
                 setFilterStatus("all");
@@ -285,60 +366,13 @@ export default function OrdersPage() {
                 setFilterEndDate("");
               }}
             >
+              <RotateCcw className="w-3.5 h-3.5" />
               إعادة تعيين
             </Button>
           </div>
         </CardContent>
       </Card>
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-        <Card className="bg-zinc-900 border-zinc-800">
-          <CardContent className="p-4">
-            <p className="text-xs text-zinc-500">إجمالي الطلبات</p>
-            <p className="text-2xl font-bold text-white">{orderStats.total}</p>
-            <ListTodo className="w-5 h-5 text-indigo-400" />
-          </CardContent>
-        </Card>
 
-        <Card className="bg-zinc-900 border-zinc-800">
-          <CardContent className="p-4">
-            <p className="text-xs text-zinc-500">قيد الانتظار</p>
-            <p className="text-2xl font-bold text-yellow-400">
-              {orderStats.pending}
-            </p>
-            <Clock className="w-5 h-5 text-yellow-400" />
-          </CardContent>
-        </Card>
-
-        <Card className="bg-zinc-900 border-zinc-800">
-          <CardContent className="p-4">
-            <p className="text-xs text-zinc-500">معلقة</p>
-            <p className="text-2xl font-bold text-orange-400">
-              {orderStats.processing}
-            </p>
-            <Clock className="w-5 h-5 text-orange-400" />
-          </CardContent>
-        </Card>
-
-        <Card className="bg-zinc-900 border-zinc-800">
-          <CardContent className="p-4">
-            <p className="text-xs text-zinc-500">مكتملة</p>
-            <p className="text-2xl font-bold text-emerald-400">
-              {orderStats.completed}
-            </p>
-            <CheckCircle2 className="w-5 h-5 text-emerald-400" />
-          </CardContent>
-        </Card>
-
-        <Card className="bg-zinc-900 border-zinc-800">
-          <CardContent className="p-4">
-            <p className="text-xs text-zinc-500">ملغية</p>
-            <p className="text-2xl font-bold text-red-400">
-              {orderStats.cancelled}
-            </p>
-            <Ban className="w-5 h-5 text-red-400" />
-          </CardContent>
-        </Card>
-      </div>
       {/* Orders List */}
       {isLoading ? (
         <div className="space-y-3">
@@ -347,9 +381,26 @@ export default function OrdersPage() {
           ))}
         </div>
       ) : filteredOrders.length === 0 ? (
-        <div className="flex flex-col items-center justify-center h-48 text-zinc-600">
-          <ShoppingCart className="w-10 h-10 mb-2 opacity-40" />
-          <p className="text-sm">لا توجد طلبات مطابقة</p>
+        <div className="flex flex-col items-center justify-center h-48 text-zinc-600 gap-1.5">
+          <ShoppingCart className="w-10 h-10 opacity-30" />
+          <p className="text-sm text-zinc-500">
+            {hasActiveFilters
+              ? "لا توجد طلبات مطابقة للفلاتر"
+              : "لا توجد طلبات بعد"}
+          </p>
+          {hasActiveFilters && (
+            <button
+              onClick={() => {
+                setSearchQuery("");
+                setFilterStatus("all");
+                setFilterStartDate("");
+                setFilterEndDate("");
+              }}
+              className="text-xs text-indigo-400 hover:text-indigo-300"
+            >
+              مسح الفلاتر
+            </button>
+          )}
         </div>
       ) : (
         <div className="space-y-3">
@@ -374,21 +425,21 @@ export default function OrdersPage() {
                   </div>
                   <div>
                     <p className="text-[10px] text-zinc-600 mb-0.5">العميل</p>
-                    <p className="text-sm font-medium text-white">
+                    <p className="text-sm font-medium text-white truncate">
                       {order.customer_name}
                     </p>
-                    <p className="text-[10px] text-zinc-600">
+                    <p className="text-[10px] text-zinc-600" dir="ltr">
                       {order.customer_phone}
                     </p>
                   </div>
                   <div>
                     <p className="text-[10px] text-zinc-600 mb-0.5">الإجمالي</p>
-                    <p className="text-sm font-bold text-emerald-400">
-                      {order.total_price} EGP
+                    <p className="text-sm font-bold text-emerald-400 tabular-nums">
+                      {fmt(order.total_price)} EGP
                     </p>
                     {order.discount > 0 && (
-                      <p className="text-[10px] text-red-400">
-                        خصم: -{order.discount} EGP
+                      <p className="text-[10px] text-red-400 tabular-nums">
+                        خصم: -{fmt(order.discount)} EGP
                       </p>
                     )}
                   </div>
@@ -432,15 +483,17 @@ export default function OrdersPage() {
                           <Truck className="w-2.5 h-2.5" /> شحن
                         </Badge>
                       )}
-                      {order.source && SOURCE_CONFIG[order.source] && (
-                        <Badge
-                          variant="outline"
-                          className={`text-[10px] gap-1 ${SOURCE_CONFIG[order.source].className}`}
-                        >
-                          {SOURCE_CONFIG[order.source].emoji}{" "}
-                          {SOURCE_CONFIG[order.source].label}
-                        </Badge>
-                      )}
+                      {order.source &&
+                        SOURCE_CONFIG[order.source as SourceKey] && (
+                          <Badge
+                            variant="outline"
+                            className={`text-[10px] gap-1 ${
+                              SOURCE_CONFIG[order.source as SourceKey].className
+                            }`}
+                          >
+                            {SOURCE_CONFIG[order.source as SourceKey].label}
+                          </Badge>
+                        )}
                     </div>
                   </div>
                 </div>
@@ -455,8 +508,8 @@ export default function OrdersPage() {
                         <span>
                           {item.products?.name} · {item.size} · x{item.quantity}
                         </span>
-                        <span className="text-zinc-300 font-medium">
-                          {(item.quantity * item.price_at_sale).toFixed(0)} EGP
+                        <span className="text-zinc-300 font-medium tabular-nums">
+                          {fmt(item.quantity * item.price_at_sale)} EGP
                         </span>
                       </div>
                     ))}
@@ -513,6 +566,9 @@ export default function OrdersPage() {
                     }
                     className="bg-zinc-800 border-zinc-700 text-white placeholder:text-zinc-600"
                   />
+                  <p className="text-[10px] text-zinc-600">
+                    لو الرقم موجود قبل كده، الطلب هيتربط تلقائياً بنفس العميل
+                  </p>
                 </div>
                 <div className="space-y-1.5 col-span-2">
                   <Label className="text-zinc-400 text-xs">العنوان</Label>
@@ -541,48 +597,56 @@ export default function OrdersPage() {
                 </div>
               </div>
 
-              {/* Source & Discount row */}
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1.5">
-                  <Label className="text-zinc-400 text-xs">مصدر الطلب</Label>
-                  <Select
-                    value={formData.source}
-                    onValueChange={(v) =>
-                      setFormData({ ...formData, source: v })
-                    }
-                  >
-                    <SelectTrigger className="bg-zinc-800 border-zinc-700 text-zinc-300 text-sm">
-                      <SelectValue placeholder="اختر المصدر" />
-                    </SelectTrigger>
-                    <SelectContent className="bg-zinc-800 border-zinc-700">
-                      {ORDER_SOURCES.map((s) => (
-                        <SelectItem
-                          key={s}
-                          value={s}
-                          className="text-zinc-200 focus:bg-zinc-700"
-                        >
-                          {SOURCE_CONFIG[s].emoji} {SOURCE_CONFIG[s].label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-1.5">
-                  <Label className="text-zinc-400 text-xs">خصم (EGP)</Label>
-                  <Input
-                    type="number"
-                    min="0"
-                    placeholder="0"
-                    value={formData.discount}
-                    onChange={(e) =>
-                      setFormData({ ...formData, discount: e.target.value })
-                    }
-                    className="bg-zinc-800 border-zinc-700 text-white placeholder:text-zinc-600"
-                  />
+              {/* Source — visual chip picker instead of plain dropdown */}
+              <div className="space-y-1.5">
+                <Label className="text-zinc-400 text-xs">مصدر الطلب</Label>
+                <div className="grid grid-cols-4 gap-2">
+                  {ORDER_SOURCES.map((s) => {
+                    const active = formData.source === s;
+                    return (
+                      <button
+                        key={s}
+                        type="button"
+                        onClick={() =>
+                          setFormData({
+                            ...formData,
+                            source: active ? "" : s,
+                          })
+                        }
+                        className={`flex flex-col items-center gap-1 py-2.5 rounded-xl border text-xs font-medium transition-colors ${
+                          active
+                            ? "border-indigo-500 bg-indigo-500/10 text-indigo-300"
+                            : "border-zinc-700 bg-zinc-800/50 text-zinc-500 hover:bg-zinc-800"
+                        }`}
+                      >
+                        <span className="text-base leading-none">
+                          {(() => {
+                            const Icon = SOURCE_CONFIG[s].icon;
+                            return <Icon className="w-5 h-5" />;
+                          })()}
+                        </span>
+                        {SOURCE_CONFIG[s].label}
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
 
-              <div className="flex items-center gap-2">
+              <div className="space-y-1.5">
+                <Label className="text-zinc-400 text-xs">خصم (EGP)</Label>
+                <Input
+                  type="number"
+                  min="0"
+                  placeholder="0"
+                  value={formData.discount}
+                  onChange={(e) =>
+                    setFormData({ ...formData, discount: e.target.value })
+                  }
+                  className="bg-zinc-800 border-zinc-700 text-white placeholder:text-zinc-600"
+                />
+              </div>
+
+              <div className="flex items-center gap-2 bg-zinc-800/50 rounded-lg px-3 py-2.5">
                 <Checkbox
                   id="courier"
                   checked={formData.shipped_with_courier}
@@ -593,8 +657,9 @@ export default function OrdersPage() {
                 />
                 <Label
                   htmlFor="courier"
-                  className="text-zinc-400 text-sm cursor-pointer"
+                  className="text-zinc-300 text-sm cursor-pointer flex items-center gap-1.5"
                 >
+                  <Truck className="w-3.5 h-3.5 text-violet-400" />
                   شحن عبر شركة توصيل
                 </Label>
               </div>
@@ -605,101 +670,145 @@ export default function OrdersPage() {
               <p className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">
                 المنتجات
               </p>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                {" "}
-                <Select
-                  value={newItem.product_id}
-                  onValueChange={handleProductSelect}
-                >
-                  <SelectTrigger className="bg-zinc-800 border-zinc-700 text-zinc-300 text-sm">
-                    <SelectValue placeholder="اختر المنتج" />
-                  </SelectTrigger>
-                  <SelectContent className="bg-zinc-800 border-zinc-700">
-                    {products?.map((p: any) => (
-                      <SelectItem
-                        key={p.id}
-                        value={String(p.id)}
-                        className="text-zinc-200 focus:bg-zinc-700"
-                      >
-                        {p.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <Select
-                  value={newItem.size}
-                  onValueChange={(v) => setNewItem({ ...newItem, size: v })}
-                  disabled={!newItem.product_id}
-                >
-                  <SelectTrigger className="bg-zinc-800 border-zinc-700 text-zinc-300 text-sm disabled:opacity-40">
-                    <SelectValue placeholder="المقاس" />
-                  </SelectTrigger>
-                  <SelectContent className="bg-zinc-800 border-zinc-700">
-                    {availableSizes.map((size) => {
-                      const v = variants.find((v) => v.size === size);
-                      return (
-                        <SelectItem
-                          key={size}
-                          value={size}
-                          className="text-zinc-200 focus:bg-zinc-700"
-                        >
-                          {size} ({v?.quantity})
-                        </SelectItem>
-                      );
-                    })}
-                  </SelectContent>
-                </Select>
-                <div className="flex gap-2 col-span-2">
-                  <Input
-                    type="number"
-                    min="1"
-                    placeholder="الكمية"
-                    value={newItem.quantity}
-                    onChange={(e) =>
-                      setNewItem({ ...newItem, quantity: e.target.value })
-                    }
-                    disabled={!newItem.size}
-                    className="bg-zinc-800 border-zinc-700 text-white placeholder:text-zinc-600 disabled:opacity-40 flex-1"
-                  />
-                  <Button
-                    onClick={handleAddItem}
-                    variant="outline"
-                    className="border-indigo-500/30 text-indigo-400 hover:bg-indigo-500/10 shrink-0"
-                  >
-                    إضافة
-                  </Button>
+
+              {/* Product Picker */}
+              <div className="bg-zinc-800/40 border border-zinc-700/50 rounded-xl p-4 space-y-4">
+                <div className="grid grid-cols-1 gap-4">
+                  {" "}
+                  {/* Product */}
+                  <div className="sm:col-span-5">
+                    <label className="text-[11px] text-zinc-500 mb-1 block">
+                      المنتج
+                    </label>
+
+                    <Select
+                      value={newItem.product_id}
+                      onValueChange={handleProductSelect}
+                    >
+                      <SelectTrigger className="h-14 bg-zinc-900 border-zinc-700 text-zinc-200 text-base disabled:opacity-40 w-full">
+                        {" "}
+                        <SelectValue placeholder="اختر المنتج" />
+                      </SelectTrigger>
+
+                      <SelectContent className="bg-zinc-900 border-zinc-700">
+                        {products?.map((p: any) => (
+                          <SelectItem
+                            key={p.id}
+                            value={String(p.id)}
+                            className="text-zinc-200"
+                          >
+                            {p.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  {/* Size */}
+                  <div className="sm:col-span-3">
+                    <label className="text-[11px] text-zinc-500 mb-1 block">
+                      المقاس
+                    </label>
+
+                    <Select
+                      value={newItem.size}
+                      onValueChange={(v) => setNewItem({ ...newItem, size: v })}
+                      disabled={!newItem.product_id}
+                    >
+                      <SelectTrigger className="h-10 bg-zinc-900 border-zinc-700 text-zinc-200 disabled:opacity-40  w-full">
+                        <SelectValue placeholder="اختار المقاس" />
+                      </SelectTrigger>
+
+                      <SelectContent className="bg-zinc-900 border-zinc-700">
+                        {availableSizes.map((size) => {
+                          const v = variants.find((v) => v.size === size);
+
+                          return (
+                            <SelectItem
+                              key={size}
+                              value={size}
+                              className="text-zinc-200"
+                            >
+                              {size}
+                              <span className="text-zinc-500 ml-1">
+                                ({v?.quantity})
+                              </span>
+                            </SelectItem>
+                          );
+                        })}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  {/* Qty */}
+                  <div className="sm:col-span-2">
+                    <label className="text-[11px] text-zinc-500 mb-1 block">
+                      الكمية
+                    </label>
+
+                    <Input
+                      type="number"
+                      min="1"
+                      placeholder="0"
+                      value={newItem.quantity}
+                      disabled={!newItem.size}
+                      onChange={(e) =>
+                        setNewItem({
+                          ...newItem,
+                          quantity: e.target.value,
+                        })
+                      }
+                      className="h-10 bg-zinc-900 border-zinc-700 text-white disabled:opacity-40"
+                    />
+                  </div>
+                  {/* Add */}
+                  <div className="sm:col-span-2 flex items-end">
+                    <Button
+                      onClick={handleAddItem}
+                      disabled={
+                        !newItem.product_id ||
+                        !newItem.size ||
+                        !newItem.quantity
+                      }
+                      className="w-full h-14 bg-indigo-600 hover:bg-indigo-500 text-base"
+                    >
+                      إضافة
+                    </Button>
+                  </div>
                 </div>
               </div>
 
-              {/* Items Table */}
-              {items.length > 0 && (
-                <div className="bg-zinc-800/50 rounded-lg overflow-hidden">
+              {/* Items */}
+              {items.length > 0 ? (
+                <div className="rounded-xl overflow-hidden border border-zinc-700/50">
                   <div className="divide-y divide-zinc-700/50">
                     {items.map((item, idx) => {
                       const product = products?.find(
                         (p: any) => p.id === item.product_id,
                       );
+
                       return (
                         <div
                           key={idx}
-                          className="flex items-center justify-between px-3 py-2.5 text-sm"
+                          className="flex items-center justify-between p-3 bg-zinc-800/40 hover:bg-zinc-800 transition"
                         >
-                          <div className="text-zinc-300">
-                            <span className="font-medium">{product?.name}</span>
-                            <span className="text-zinc-500 mx-1">·</span>
-                            <span className="text-zinc-500">
-                              {item.size} · x{item.quantity}
+                          <div className="flex flex-col">
+                            <span className="text-sm text-white font-medium">
+                              {product?.name}
+                            </span>
+
+                            <span className="text-xs text-zinc-500">
+                              {item.size} × {item.quantity}
                             </span>
                           </div>
+
                           <div className="flex items-center gap-3">
-                            <span className="text-emerald-400 font-medium text-xs">
-                              {(item.quantity * item.price_at_sale).toFixed(0)}{" "}
-                              EGP
+                            <span className="text-emerald-400 text-sm font-semibold">
+                              {fmt(item.quantity * item.price_at_sale)} EGP
                             </span>
+
                             <Button
                               size="icon"
                               variant="ghost"
-                              className="h-6 w-6 text-zinc-600 hover:text-red-400"
+                              className="h-7 w-7 text-zinc-500 hover:text-red-400"
                               onClick={() =>
                                 setItems(items.filter((_, i) => i !== idx))
                               }
@@ -712,23 +821,31 @@ export default function OrdersPage() {
                     })}
                   </div>
 
-                  {/* Subtotal / Discount / Total */}
-                  <div className="border-t border-zinc-700/50 px-3 py-2 space-y-1">
+                  {/* Total */}
+                  <div className="bg-zinc-900 p-3 space-y-2">
                     <div className="flex justify-between text-xs text-zinc-500">
-                      <span>المجموع الفرعي</span>
-                      <span>{subtotal.toFixed(0)} EGP</span>
+                      <span>المجموع</span>
+                      <span>{fmt(subtotal)} EGP</span>
                     </div>
+
                     {discountAmount > 0 && (
                       <div className="flex justify-between text-xs text-red-400">
-                        <span>الخصم</span>
-                        <span>-{discountAmount.toFixed(0)} EGP</span>
+                        <span>خصم</span>
+                        <span>-{fmt(discountAmount)} EGP</span>
                       </div>
                     )}
-                    <div className="flex justify-between text-sm font-bold text-emerald-400 pt-1 border-t border-zinc-700/50">
+
+                    <div className="flex justify-between border-t border-zinc-700 pt-2 text-emerald-400 font-bold">
                       <span>الإجمالي</span>
-                      <span>{totalPrice.toFixed(0)} EGP</span>
+                      <span>{fmt(totalPrice)} EGP</span>
                     </div>
                   </div>
+                </div>
+              ) : (
+                <div className="border border-dashed border-zinc-700 rounded-xl py-8 text-center text-zinc-600">
+                  <Package2 className="mx-auto w-7 h-7 mb-2 opacity-40" />
+
+                  <p className="text-xs">لسه مفيش منتجات مضافة</p>
                 </div>
               )}
             </div>
@@ -738,7 +855,11 @@ export default function OrdersPage() {
               disabled={loading || items.length === 0}
               className="w-full bg-indigo-600 hover:bg-indigo-500 text-white disabled:opacity-40"
             >
-              {loading ? "جاري الإنشاء..." : "إنشاء الطلب"}
+              {loading
+                ? "جاري الإنشاء..."
+                : items.length > 0
+                  ? `إنشاء الطلب · ${fmt(totalPrice)} EGP`
+                  : "إنشاء الطلب"}
             </Button>
           </div>
         </SheetContent>

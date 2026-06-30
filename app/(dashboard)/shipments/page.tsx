@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useShipments, useCreateShipment } from "@/hooks/useShipments";
 import { useOrders, useUpdateOrder } from "@/hooks/useOrders";
 import { ORDER_STATUSES, STATUS_CONFIG } from "@/lib/orderStatus";
@@ -33,7 +33,12 @@ import {
   Clock,
   XCircle,
   DollarSign,
+  Search,
 } from "lucide-react";
+
+const fmt = (n: number) =>
+  new Intl.NumberFormat("ar-EG", { maximumFractionDigits: 0 }).format(n);
+
 export default function ShipmentsPage() {
   const { data: shipments, isLoading } = useShipments();
   const { data: orders } = useOrders();
@@ -42,6 +47,7 @@ export default function ShipmentsPage() {
 
   const [sheetOpen, setSheetOpen] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [orderSearch, setOrderSearch] = useState("");
   const [formData, setFormData] = useState({
     courier_name: "",
     tracking_number: "",
@@ -55,6 +61,35 @@ export default function ShipmentsPage() {
         ? prev.selected_orders.filter((id) => id !== orderId)
         : [...prev.selected_orders, orderId],
     }));
+  };
+
+  const pendingOrders =
+    orders?.filter(
+      (o: any) => o.status === "pending" || o.status === "prepared",
+    ) || [];
+
+  const readyForCourier = pendingOrders.filter(
+    (o: any) => o.shipped_with_courier,
+  );
+
+  const visiblePendingOrders = useMemo(() => {
+    const q = orderSearch.trim().toLowerCase();
+    if (!q) return pendingOrders;
+    return pendingOrders.filter(
+      (o: any) =>
+        o.order_number?.toLowerCase().includes(q) ||
+        o.customer_name?.toLowerCase().includes(q),
+    );
+  }, [pendingOrders, orderSearch]);
+
+  // فتح الشيت مع تحديد الطلبات المعلّمة "شحن عبر شركة توصيل" تلقائياً
+  const openNewShipmentSheet = () => {
+    const preselected = pendingOrders
+      .filter((o: any) => o.shipped_with_courier)
+      .map((o: any) => o.id);
+    setFormData((prev) => ({ ...prev, selected_orders: preselected }));
+    setOrderSearch("");
+    setSheetOpen(true);
   };
 
   const handleSubmit = async () => {
@@ -90,19 +125,6 @@ export default function ShipmentsPage() {
       alert("❌ خطأ في تحديث الحالة");
     }
   };
-  const pendingOrders =
-    orders?.filter(
-      (o: any) => o.status === "pending" || o.status === "prepared",
-    ) || [];
-
-  const shippedOrders =
-    orders?.filter((o: any) => o.status === "shipped") || [];
-
-  const deliveredOrders =
-    orders?.filter((o: any) => o.status === "delivered") || [];
-
-  const cancelledOrders =
-    orders?.filter((o: any) => o.status === "cancelled") || [];
 
   // مهم: احنا عايزين الشحنات اللي اتعملها assign بس
   const assignedOrders =
@@ -153,7 +175,7 @@ export default function ShipmentsPage() {
         </div>
         <Button
           size="sm"
-          onClick={() => setSheetOpen(true)}
+          onClick={openNewShipmentSheet}
           className="bg-indigo-600 hover:bg-indigo-500 text-white gap-1.5"
         >
           <Plus className="w-4 h-4" />
@@ -161,21 +183,63 @@ export default function ShipmentsPage() {
         </Button>
       </div>
 
-      {/* Stats Cards */}
+      {/* Ready for courier — distinct callout */}
+      {readyForCourier.length > 0 && (
+        <Card className="bg-gradient-to-br from-violet-950/30 via-zinc-900 to-zinc-900 border-violet-500/20">
+          <CardContent className="p-4">
+            <div className="flex items-center justify-between mb-3">
+              <p className="text-sm font-semibold text-violet-300 flex items-center gap-1.5">
+                <Truck className="w-4 h-4" />
+                طلبات جاهزة للشحن
+                <Badge
+                  variant="outline"
+                  className="border-violet-500/30 text-violet-300 text-[10px] tabular-nums"
+                >
+                  {readyForCourier.length}
+                </Badge>
+              </p>
+              <Button
+                size="sm"
+                variant="outline"
+                className="border-violet-500/30 text-violet-300 hover:bg-violet-500/10 text-xs h-7"
+                onClick={openNewShipmentSheet}
+              >
+                عمل شحنة بيها
+              </Button>
+            </div>
+            <div className="space-y-2">
+              {readyForCourier.map((order: any) => (
+                <div
+                  key={order.id}
+                  className="flex items-center justify-between gap-2 bg-zinc-800/50 rounded-lg px-3 py-2.5 text-xs"
+                >
+                  <span className="font-mono text-zinc-400 shrink-0">
+                    {order.order_number}
+                  </span>
+                  <span className="text-zinc-300 truncate flex-1">
+                    {order.customer_name}
+                  </span>
+                  <span className="text-emerald-400 font-medium shrink-0 tabular-nums">
+                    {fmt(order.total_price)} EGP
+                  </span>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
+      {/* Stats Cards */}
       <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
-        {" "}
         <Card className="bg-zinc-900 border-zinc-800">
           <CardContent className="p-4">
             <div className="flex justify-between items-center">
               <div>
                 <p className="text-xs text-zinc-500">إجمالي الشحنات</p>
-
-                <p className="text-2xl font-bold text-white">
-                  {shipments?.length || 0}{" "}
+                <p className="text-2xl font-bold text-white tabular-nums">
+                  {shipments?.length || 0}
                 </p>
               </div>
-
               <Package className="w-5 h-5 text-indigo-400" />
             </div>
           </CardContent>
@@ -185,12 +249,10 @@ export default function ShipmentsPage() {
             <div className="flex justify-between items-center">
               <div>
                 <p className="text-xs text-zinc-500">معلقة</p>
-
-                <p className="text-2xl font-bold text-yellow-400">
-                  {assignedPending}{" "}
+                <p className="text-2xl font-bold text-yellow-400 tabular-nums">
+                  {assignedPending}
                 </p>
               </div>
-
               <Clock className="w-5 h-5 text-yellow-400" />
             </div>
           </CardContent>
@@ -200,12 +262,10 @@ export default function ShipmentsPage() {
             <div className="flex justify-between">
               <div>
                 <p className="text-xs text-zinc-500">عند شركة الشحن</p>
-
-                <p className="text-2xl font-bold text-blue-400">
-                  {assignedShipped.length}{" "}
+                <p className="text-2xl font-bold text-blue-400 tabular-nums">
+                  {assignedShipped.length}
                 </p>
               </div>
-
               <Truck className="w-5 h-5 text-blue-400" />
             </div>
           </CardContent>
@@ -215,12 +275,10 @@ export default function ShipmentsPage() {
             <div className="flex justify-between">
               <div>
                 <p className="text-xs text-zinc-500">مكتمل</p>
-
-                <p className="text-2xl font-bold text-emerald-400">
-                  {assignedDelivered}{" "}
+                <p className="text-2xl font-bold text-emerald-400 tabular-nums">
+                  {assignedDelivered}
                 </p>
               </div>
-
               <CheckCircle className="w-5 h-5 text-emerald-400" />
             </div>
           </CardContent>
@@ -230,12 +288,10 @@ export default function ShipmentsPage() {
             <div className="flex justify-between">
               <div>
                 <p className="text-xs text-zinc-500">ملغي</p>
-
-                <p className="text-2xl font-bold text-red-400">
+                <p className="text-2xl font-bold text-red-400 tabular-nums">
                   {assignedCancelled}
                 </p>
               </div>
-
               <XCircle className="w-5 h-5 text-red-400" />
             </div>
           </CardContent>
@@ -245,14 +301,11 @@ export default function ShipmentsPage() {
             <div className="flex justify-between">
               <div>
                 <p className="text-xs text-zinc-500">قيمة الشحنات</p>
-
-                <p className="text-xl font-bold text-violet-400">
-                  {shippedValue.toFixed(0)}
+                <p className="text-xl font-bold text-violet-400 tabular-nums">
+                  {fmt(shippedValue)}
                 </p>
-
                 <p className="text-[10px] text-zinc-600">EGP</p>
               </div>
-
               <DollarSign className="w-5 h-5 text-violet-400" />
             </div>
           </CardContent>
@@ -267,14 +320,14 @@ export default function ShipmentsPage() {
           ))}
         </div>
       ) : !shipments?.length ? (
-        <div className="flex flex-col items-center justify-center h-56 text-zinc-600">
-          <Package className="w-10 h-10 mb-2 opacity-40" />
-          <p className="text-sm">لا توجد شحنات بعد</p>
+        <div className="flex flex-col items-center justify-center h-56 text-zinc-600 gap-1.5">
+          <Package className="w-10 h-10 opacity-30" />
+          <p className="text-sm text-zinc-500">لا توجد شحنات بعد</p>
           <Button
             variant="ghost"
             size="sm"
-            className="mt-3 text-indigo-400 hover:text-indigo-300"
-            onClick={() => setSheetOpen(true)}
+            className="mt-1 text-indigo-400 hover:text-indigo-300"
+            onClick={openNewShipmentSheet}
           >
             أنشئ أول شحنة
           </Button>
@@ -303,7 +356,7 @@ export default function ShipmentsPage() {
                     </p>
                     <div className="flex items-center gap-1.5">
                       <Truck className="w-3.5 h-3.5 text-violet-400" />
-                      <p className="text-sm font-medium text-white">
+                      <p className="text-sm font-medium text-white truncate">
                         {shipment.courier_name}
                       </p>
                     </div>
@@ -339,13 +392,13 @@ export default function ShipmentsPage() {
                   </Badge>
                   <Badge
                     variant="outline"
-                    className="text-[10px] border-emerald-500/20 text-emerald-400"
+                    className="text-[10px] border-emerald-500/20 text-emerald-400 tabular-nums"
                   >
-                    {totalValue(shipment).toFixed(0)} EGP
+                    {fmt(totalValue(shipment))} EGP
                   </Badge>
                 </div>
 
-                {/* Orders — الحالة هنا حقيقية وقابلة للتغيير، 
+                {/* Orders — الحالة هنا حقيقية وقابلة للتغيير،
                     ومتزامنة 100% مع صفحة الطلبات */}
                 {shipment.shipment_orders?.length > 0 && (
                   <div className="bg-zinc-800/50 rounded-lg divide-y divide-zinc-700/50">
@@ -360,8 +413,8 @@ export default function ShipmentsPage() {
                         <span className="text-zinc-300 truncate flex-1">
                           {so.orders.customer_name}
                         </span>
-                        <span className="text-emerald-400 font-medium shrink-0">
-                          {so.orders.total_price} EGP
+                        <span className="text-emerald-400 font-medium shrink-0 tabular-nums">
+                          {fmt(so.orders.total_price)} EGP
                         </span>
                         <Select
                           value={so.orders.status}
@@ -457,7 +510,7 @@ export default function ShipmentsPage() {
                 </p>
                 <Badge
                   variant="outline"
-                  className="text-[10px] border-indigo-500/20 text-indigo-400"
+                  className="text-[10px] border-indigo-500/20 text-indigo-400 tabular-nums"
                 >
                   {formData.selected_orders.length} محدد
                 </Badge>
@@ -468,31 +521,62 @@ export default function ShipmentsPage() {
                   لا توجد طلبات جاهزة للشحن
                 </div>
               ) : (
-                <div className="bg-zinc-800/50 rounded-lg divide-y divide-zinc-700/50 max-h-64 overflow-y-auto">
-                  {pendingOrders.map((order: any) => (
-                    <label
-                      key={order.id}
-                      className="flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-zinc-800 transition-colors"
-                    >
-                      <Checkbox
-                        checked={formData.selected_orders.includes(order.id)}
-                        onCheckedChange={() => toggleOrder(order.id)}
-                        className="border-zinc-600 data-[state=checked]:bg-indigo-600 shrink-0"
+                <>
+                  {pendingOrders.length > 5 && (
+                    <div className="relative">
+                      <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-zinc-600" />
+                      <Input
+                        placeholder="بحث برقم الطلب أو اسم العميل..."
+                        value={orderSearch}
+                        onChange={(e) => setOrderSearch(e.target.value)}
+                        className="bg-zinc-800 border-zinc-700 text-white placeholder:text-zinc-600 text-sm pr-9 h-9"
                       />
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium text-zinc-200 font-mono">
-                          {order.order_number}
-                        </p>
-                        <p className="text-xs text-zinc-500 truncate">
-                          {order.customer_name}
-                        </p>
-                      </div>
-                      <span className="text-xs font-semibold text-emerald-400 shrink-0">
-                        {order.total_price} EGP
-                      </span>
-                    </label>
-                  ))}
-                </div>
+                    </div>
+                  )}
+                  <div className="bg-zinc-800/50 rounded-lg divide-y divide-zinc-700/50 max-h-64 overflow-y-auto">
+                    {visiblePendingOrders.length === 0 ? (
+                      <p className="text-center text-zinc-600 text-xs py-6">
+                        لا توجد طلبات مطابقة للبحث
+                      </p>
+                    ) : (
+                      visiblePendingOrders.map((order: any) => (
+                        <label
+                          key={order.id}
+                          className="flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-zinc-800 transition-colors"
+                        >
+                          <Checkbox
+                            checked={formData.selected_orders.includes(
+                              order.id,
+                            )}
+                            onCheckedChange={() => toggleOrder(order.id)}
+                            className="border-zinc-600 data-[state=checked]:bg-indigo-600 shrink-0"
+                          />
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-1.5">
+                              <p className="text-sm font-medium text-zinc-200 font-mono">
+                                {order.order_number}
+                              </p>
+                              {order.shipped_with_courier && (
+                                <Badge
+                                  variant="outline"
+                                  className="text-[9px] border-violet-500/30 text-violet-400 px-1 py-0"
+                                >
+                                  محدد للشحن
+                                </Badge>
+                              )}
+                            </div>
+                            <p className="text-xs text-zinc-500 truncate">
+                              {order.customer_name}
+                            </p>
+                          </div>
+                          <span className="text-xs font-semibold text-emerald-400 shrink-0 tabular-nums">
+                            {fmt(order.total_price)} EGP
+                          </span>
+                        </label>
+                      ))
+                    )}
+                  </div>
+                </>
               )}
             </div>
 

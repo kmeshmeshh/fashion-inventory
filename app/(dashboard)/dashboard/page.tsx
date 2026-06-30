@@ -17,7 +17,6 @@ import {
   ResponsiveContainer,
 } from "recharts";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   TrendingUp,
@@ -26,6 +25,9 @@ import {
   Package,
   ShoppingCart,
   BarChart3,
+  Wallet,
+  Receipt,
+  Ban,
 } from "lucide-react";
 
 const COLORS = [
@@ -37,6 +39,9 @@ const COLORS = [
   "#3b82f6",
 ];
 
+const fmt = (n: number) =>
+  new Intl.NumberFormat("ar-EG", { maximumFractionDigits: 0 }).format(n);
+
 interface TooltipProps {
   active?: boolean;
   payload?: Array<{ value: number; name: string; color?: string }>;
@@ -46,11 +51,17 @@ interface TooltipProps {
 const CustomTooltip = ({ active, payload }: TooltipProps) => {
   if (active && payload && payload.length) {
     return (
-      <div className="bg-zinc-900 border border-zinc-700 p-3 rounded-lg shadow-xl text-xs">
+      <div className="bg-zinc-900 border border-zinc-700 p-3 rounded-lg shadow-xl text-xs space-y-1">
         {payload.map((entry, i) => (
-          <p key={i} className="text-zinc-200" style={{ color: entry.color }}>
+          <p key={i} className="text-zinc-300 flex items-center gap-2">
+            <span
+              className="w-2 h-2 rounded-full shrink-0"
+              style={{ backgroundColor: entry.color }}
+            />
             {entry.name}:{" "}
-            <span className="font-bold">{entry.value?.toFixed(0)} EGP</span>
+            <span className="font-semibold text-white">
+              {entry.value?.toFixed(0)} EGP
+            </span>
           </p>
         ))}
       </div>
@@ -64,7 +75,7 @@ const PieTooltip = ({ active, payload }: TooltipProps) => {
     return (
       <div className="bg-zinc-900 border border-zinc-700 p-3 rounded-lg shadow-xl text-xs">
         <p className="text-zinc-400">{payload[0].name}</p>
-        <p className="text-white font-bold">
+        <p className="text-white font-semibold">
           {payload[0].value?.toFixed(0)} EGP
         </p>
       </div>
@@ -90,24 +101,28 @@ function KPICard({
 }) {
   return (
     <Card className="bg-zinc-900 border-zinc-800 hover:border-zinc-700 transition-colors">
-      <CardContent className="p-5">
-        <div className="flex items-start justify-between">
-          <div className="space-y-1">
-            <p className="text-xs text-zinc-500 font-medium">{title}</p>
-            <p className={`text-2xl font-bold tracking-tight ${color}`}>
+      <CardContent className="p-4">
+        <div className="flex items-start justify-between gap-2">
+          <div className="space-y-1 min-w-0">
+            <p className="text-[11px] text-zinc-500 font-medium truncate">
+              {title}
+            </p>
+            <p
+              className={`text-xl font-bold tracking-tight tabular-nums ${color}`}
+            >
               {value}
             </p>
-            <p className="text-xs text-zinc-500 flex items-center gap-1">
+            <p className="text-[11px] text-zinc-600 flex items-center gap-1">
               {trend === "up" && (
-                <TrendingUp className="w-3 h-3 text-emerald-500" />
+                <TrendingUp className="w-3 h-3 text-emerald-500 shrink-0" />
               )}
               {trend === "down" && (
-                <TrendingDown className="w-3 h-3 text-red-500" />
+                <TrendingDown className="w-3 h-3 text-red-500 shrink-0" />
               )}
-              {sub}
+              <span className="truncate">{sub}</span>
             </p>
           </div>
-          <div className={`p-2 rounded-lg bg-zinc-800`}>
+          <div className="p-2 rounded-lg bg-zinc-800 shrink-0">
             <Icon className={`w-4 h-4 ${color}`} />
           </div>
         </div>
@@ -124,9 +139,10 @@ export default function DashboardPage() {
     return (
       <div className="space-y-6">
         <Skeleton className="h-8 w-48 bg-zinc-800" />
+        <Skeleton className="h-32 bg-zinc-800 rounded-xl" />
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
           {Array.from({ length: 4 }).map((_, i) => (
-            <Skeleton key={i} className="h-28 bg-zinc-800 rounded-xl" />
+            <Skeleton key={i} className="h-24 bg-zinc-800 rounded-xl" />
           ))}
         </div>
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -139,9 +155,12 @@ export default function DashboardPage() {
 
   if (!analytics) {
     return (
-      <div className="flex flex-col items-center justify-center h-64 text-zinc-500">
-        <BarChart3 className="w-10 h-10 mb-3 opacity-40" />
-        <p className="text-sm">لا توجد بيانات</p>
+      <div className="flex flex-col items-center justify-center h-64 text-zinc-600 gap-2">
+        <BarChart3 className="w-10 h-10 opacity-30" />
+        <p className="text-sm text-zinc-500">لا توجد بيانات كافية بعد</p>
+        <p className="text-xs text-zinc-700">
+          هتظهر هنا أول ما تسجّل طلبات ومصاريف
+        </p>
       </div>
     );
   }
@@ -159,29 +178,17 @@ export default function DashboardPage() {
     name: item.name || "Unknown",
     quantity: typeof item.quantity === "number" ? item.quantity : 0,
   }));
+
   const orderStats = orders.reduce(
     (acc: any, order: any) => {
       const price = Number(order.total_price) || 0;
-
-      if (order.status === "delivered") {
-        acc.income += price;
-      }
-
-      if (["pending", "prepared", "shipped"].includes(order.status)) {
+      if (order.status === "delivered") acc.income += price;
+      if (["pending", "prepared", "shipped"].includes(order.status))
         acc.expectedIncome += price;
-      }
-
-      if (order.status === "cancelled") {
-        acc.cancelled += price;
-      }
-
+      if (order.status === "cancelled") acc.cancelled += price;
       return acc;
     },
-    {
-      income: 0,
-      expectedIncome: 0,
-      cancelled: 0,
-    },
+    { income: 0, expectedIncome: 0, cancelled: 0 },
   );
 
   const revenueSummaryData = [
@@ -204,6 +211,7 @@ export default function DashboardPage() {
   const profitMargin = totalRevenue > 0 ? (netProfit / totalRevenue) * 100 : 0;
   const expenseRatio =
     totalRevenue > 0 ? (totalExpenses / totalRevenue) * 100 : 0;
+  const isProfitable = netProfit >= 0;
 
   return (
     <div className="space-y-6">
@@ -214,55 +222,126 @@ export default function DashboardPage() {
         <p className="text-zinc-500 text-sm mt-1">نظرة عامة على أداء المتجر</p>
       </div>
 
+      {/* Hero — Net Profit */}
+      <Card
+        className={`border overflow-hidden relative ${
+          isProfitable
+            ? "bg-gradient-to-br from-violet-950/40 via-zinc-900 to-zinc-900 border-violet-500/20"
+            : "bg-gradient-to-br from-red-950/40 via-zinc-900 to-zinc-900 border-red-500/20"
+        }`}
+      >
+        <CardContent className="p-5 md:p-6">
+          <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
+            <div>
+              <p className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-2">
+                الربح الصافي
+              </p>
+              <div className="flex items-baseline gap-2">
+                <span
+                  className={`text-4xl md:text-5xl font-bold tracking-tight tabular-nums ${
+                    isProfitable ? "text-violet-300" : "text-red-400"
+                  }`}
+                >
+                  {fmt(netProfit)}
+                </span>
+                <span className="text-zinc-500 text-sm font-medium">EGP</span>
+              </div>
+              <p className="text-xs text-zinc-500 mt-2 flex items-center gap-1.5">
+                {isProfitable ? (
+                  <TrendingUp className="w-3.5 h-3.5 text-emerald-500" />
+                ) : (
+                  <TrendingDown className="w-3.5 h-3.5 text-red-500" />
+                )}
+                هامش ربح {profitMargin.toFixed(1)}% من إجمالي الإيرادات
+              </p>
+            </div>
+
+            <div className="grid grid-cols-3 gap-4 md:gap-6 md:text-right shrink-0">
+              <div>
+                <p className="text-[11px] text-zinc-600 mb-0.5">الإيرادات</p>
+                <p className="text-sm font-bold text-emerald-400 tabular-nums">
+                  {fmt(totalRevenue)}
+                </p>
+              </div>
+              <div>
+                <p className="text-[11px] text-zinc-600 mb-0.5">
+                  تكلفة البضاعة
+                </p>
+                <p className="text-sm font-bold text-blue-400 tabular-nums">
+                  {fmt(totalCOGS)}
+                </p>
+              </div>
+              <div>
+                <p className="text-[11px] text-zinc-600 mb-0.5">المصاريف</p>
+                <p className="text-sm font-bold text-red-400 tabular-nums">
+                  {fmt(totalExpenses)}
+                </p>
+              </div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
       {/* KPI Cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-6 gap-3">
-        {" "}
-        <KPICard
-          title="الإيرادات"
-          value={`${totalRevenue.toFixed(0)}`}
-          sub="EGP هذا الشهر"
-          icon={DollarSign}
-          trend="up"
-          color="text-emerald-400"
-        />
-        <KPICard
-          title="الدخل المتوقع"
-          value={`${orderStats.expectedIncome.toFixed(0)}`}
-          sub="طلبات قيد التنفيذ"
-          icon={DollarSign}
-          color="text-yellow-400"
-        />
-        <KPICard
-          title="الملغي"
-          value={`${orderStats.cancelled.toFixed(0)}`}
-          sub="طلبات ملغاة"
-          icon={TrendingDown}
-          trend="down"
-          color="text-red-400"
-        />
-        <KPICard
-          title="المصاريف"
-          value={`${totalExpenses.toFixed(0)}`}
-          sub="EGP إجمالي"
-          icon={TrendingDown}
-          trend="down"
-          color="text-red-400"
-        />
-        <KPICard
-          title="تكلفة البضاعة"
-          value={`${totalCOGS.toFixed(0)}`}
-          sub="EGP COGS"
-          icon={Package}
-          color="text-blue-400"
-        />
-        <KPICard
-          title="الربح الصافي"
-          value={`${netProfit.toFixed(0)}`}
-          sub={`${profitMargin.toFixed(1)}% هامش الربح`}
-          icon={TrendingUp}
-          trend={netProfit >= 0 ? "up" : "down"}
-          color={netProfit >= 0 ? "text-violet-400" : "text-red-400"}
-        />
+      <div>
+        <p className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-2.5">
+          الإيرادات والطلبات
+        </p>
+        <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
+          <KPICard
+            title="الدخل المتوقع"
+            value={fmt(orderStats.expectedIncome)}
+            sub="طلبات قيد التنفيذ"
+            icon={Wallet}
+            color="text-yellow-400"
+          />
+          <KPICard
+            title="طلبات ملغاة"
+            value={fmt(orderStats.cancelled)}
+            sub="EGP قيمة ملغاة"
+            icon={Ban}
+            trend="down"
+            color="text-red-400"
+          />
+          <KPICard
+            title="متوسط قيمة الطلب"
+            value={fmt(avgOrderValue)}
+            sub={`${totalOrders} طلب إجمالاً`}
+            icon={ShoppingCart}
+            color="text-indigo-400"
+          />
+        </div>
+      </div>
+
+      <div>
+        <p className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-2.5">
+          الكفاءة التشغيلية
+        </p>
+        <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
+          <KPICard
+            title="تكلفة البضاعة"
+            value={fmt(totalCOGS)}
+            sub="COGS إجمالي"
+            icon={Package}
+            color="text-blue-400"
+          />
+          <KPICard
+            title="نسبة المصاريف"
+            value={`${expenseRatio.toFixed(1)}%`}
+            sub="من الإيرادات"
+            icon={Receipt}
+            trend="down"
+            color="text-orange-400"
+          />
+          <KPICard
+            title="هامش الربح"
+            value={`${profitMargin.toFixed(1)}%`}
+            sub={isProfitable ? "أداء إيجابي" : "أداء سلبي"}
+            icon={DollarSign}
+            trend={isProfitable ? "up" : "down"}
+            color={isProfitable ? "text-violet-400" : "text-red-400"}
+          />
+        </div>
       </div>
 
       {/* Charts Row 1 */}
@@ -288,7 +367,10 @@ export default function DashboardPage() {
                   axisLine={false}
                   tickLine={false}
                 />
-                <Tooltip content={<CustomTooltip />} />
+                <Tooltip
+                  content={<CustomTooltip />}
+                  cursor={{ fill: "#27272a55" }}
+                />
                 <Legend wrapperStyle={{ fontSize: "11px", color: "#a1a1aa" }} />
                 <Bar
                   dataKey="revenue"
@@ -352,8 +434,11 @@ export default function DashboardPage() {
                 </PieChart>
               </ResponsiveContainer>
             ) : (
-              <div className="flex items-center justify-center h-64 text-zinc-600 text-sm">
-                لا توجد مصاريف
+              <div className="flex flex-col items-center justify-center h-64 text-zinc-600 gap-1.5">
+                <Receipt className="w-8 h-8 opacity-30" />
+                <p className="text-sm text-zinc-600">
+                  لا توجد مصاريف مسجلة بعد
+                </p>
               </div>
             )}
           </CardContent>
@@ -387,7 +472,10 @@ export default function DashboardPage() {
                     axisLine={false}
                     tickLine={false}
                   />
-                  <Tooltip content={<CustomTooltip />} />
+                  <Tooltip
+                    content={<CustomTooltip />}
+                    cursor={{ fill: "#27272a55" }}
+                  />
                   <Bar
                     dataKey="quantity"
                     fill="#6366f1"
@@ -397,8 +485,11 @@ export default function DashboardPage() {
                 </BarChart>
               </ResponsiveContainer>
             ) : (
-              <div className="flex items-center justify-center h-64 text-zinc-600 text-sm">
-                لا توجد بيانات
+              <div className="flex flex-col items-center justify-center h-64 text-zinc-600 gap-1.5">
+                <Package className="w-8 h-8 opacity-30" />
+                <p className="text-sm text-zinc-600">
+                  لا توجد بيانات مبيعات بعد
+                </p>
               </div>
             )}
           </CardContent>
@@ -410,7 +501,7 @@ export default function DashboardPage() {
               المقاييس الرئيسية
             </CardTitle>
           </CardHeader>
-          <CardContent className="space-y-3">
+          <CardContent className="space-y-2.5">
             {[
               {
                 label: "عدد الطلبات",
@@ -443,10 +534,10 @@ export default function DashboardPage() {
             ].map((m) => (
               <div
                 key={m.label}
-                className={`flex items-center justify-between p-3 rounded-lg ${m.bg}`}
+                className={`flex items-center justify-between px-3.5 py-3 rounded-lg ${m.bg}`}
               >
                 <span className="text-sm text-zinc-400">{m.label}</span>
-                <span className={`text-xl font-bold ${m.color}`}>
+                <span className={`text-lg font-bold tabular-nums ${m.color}`}>
                   {m.value}
                   {m.unit}
                 </span>

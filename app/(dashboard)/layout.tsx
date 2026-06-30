@@ -13,6 +13,7 @@ import {
   ShoppingCart,
   DollarSign,
   Truck,
+  Users,
   LogOut,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -21,6 +22,7 @@ const links = [
   { href: "/dashboard", label: "لوحة التحكم", icon: LayoutDashboard },
   { href: "/inventory", label: "المخزن", icon: Package },
   { href: "/orders", label: "الطلبات", icon: ShoppingCart },
+  { href: "/customers", label: "العملاء", icon: Users },
   { href: "/expenses", label: "المصاريف", icon: DollarSign },
   { href: "/shipments", label: "الشحنات", icon: Truck },
 ];
@@ -166,7 +168,8 @@ export default function DashboardLayout({
 
       {/* Mobile Bottom Nav */}
       <nav className="md:hidden fixed bottom-0 left-0 right-0 z-30 bg-zinc-900/95 backdrop-blur-md border-t border-zinc-800 safe-area-pb">
-        <div className="grid grid-cols-5 h-16">
+        <div className="grid grid-cols-6 h-16">
+          {" "}
           {links.map(({ href, label, icon: Icon }) => {
             const active = pathname === href;
             return (

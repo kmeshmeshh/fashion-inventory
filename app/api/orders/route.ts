@@ -31,6 +31,7 @@ export async function GET(request: NextRequest) {
     );
   }
 }
+
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
@@ -41,6 +42,8 @@ export async function POST(request: NextRequest) {
       items,
       notes,
       shipped_with_courier,
+      source,
+      discount,
     } = body;
 
     const authHeader = request.headers.get("authorization");
@@ -59,6 +62,45 @@ export async function POST(request: NextRequest) {
     }
 
     const supabase = supabaseServer();
+
+    // 0. Find or create customer by phone
+    let customerId: number | null = null;
+    if (customer_phone) {
+      const { data: existingCustomer, error: findCustomerError } =
+        await supabase
+          .from("customers")
+          .select("id, orders_count")
+          .eq("phone", customer_phone)
+          .maybeSingle();
+
+      if (findCustomerError) throw findCustomerError;
+
+      if (existingCustomer) {
+        customerId = existingCustomer.id;
+        const { error: updateCustomerError } = await supabase
+          .from("customers")
+          .update({ orders_count: (existingCustomer.orders_count || 0) + 1 })
+          .eq("id", customerId);
+
+        if (updateCustomerError) throw updateCustomerError;
+      } else {
+        const { data: newCustomer, error: newCustomerError } = await supabase
+          .from("customers")
+          .insert([
+            {
+              name: customer_name,
+              phone: customer_phone,
+              address: customer_address || null,
+              orders_count: 1,
+            },
+          ])
+          .select()
+          .single();
+
+        if (newCustomerError) throw newCustomerError;
+        customerId = newCustomer.id;
+      }
+    }
 
     // 1. Validate inventory
     for (const item of items) {
@@ -84,10 +126,13 @@ export async function POST(request: NextRequest) {
 
     const order_number = `ORD-${String((count || 0) + 1).padStart(4, "0")}`;
 
-    let total_price = 0;
+    let subtotal = 0;
     for (const item of items) {
-      total_price += item.quantity * item.price_at_sale;
+      subtotal += item.quantity * item.price_at_sale;
     }
+
+    const discountAmount = Number(discount) || 0;
+    const total_price = Math.max(0, subtotal - discountAmount);
 
     // 3. Create order
     const { data: orderData, error: orderError } = await supabase
@@ -95,11 +140,15 @@ export async function POST(request: NextRequest) {
       .insert([
         {
           order_number,
+          customer_id: customerId,
           customer_name,
           customer_phone,
           customer_address,
           total_price,
+          discount: discountAmount,
+          source: source || null,
           notes,
+          shipped_with_courier,
           created_by: user.id,
           status: "pending",
         },
@@ -110,13 +159,13 @@ export async function POST(request: NextRequest) {
 
     const orderId = orderData[0].id;
 
-    // 4. Create order items (هنا التعديل الأساسي)
+    // 4. Create order items
     const orderItems = items.map((item: any) => ({
       order_id: orderId,
       product_id: item.product_id,
       quantity: item.quantity,
       price_at_sale: item.price_at_sale,
-      size: item.size, // <--- ضفنا الـ size هنا عشان يتسجل في الداتابيز
+      size: item.size,
       status: "pending",
     }));
 
