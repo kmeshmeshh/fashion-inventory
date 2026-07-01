@@ -12,6 +12,10 @@ export const productVariantCreateSchema = productVariantSchema.pick({
   quantity: true,
 });
 
+export const productVariantBulkCreateSchema = z
+  .array(productVariantCreateSchema)
+  .min(1);
+
 export const productSchema = z.object({
   id: z.number().optional(),
   sku: z.string().min(1),

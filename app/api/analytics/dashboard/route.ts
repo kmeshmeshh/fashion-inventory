@@ -110,7 +110,7 @@ export async function GET(request: NextRequest) {
 
     const totalCOGS =
       orderItems
-        ?.filter((item: any) => item.orders?.status === "delivered")
+        ?.filter((item: any) => item.orders?.status !== "cancelled")
         .reduce((sum: number, item: any) => {
           return sum + item.quantity * (item.products?.cost_per_unit || 0);
         }, 0) || 0;

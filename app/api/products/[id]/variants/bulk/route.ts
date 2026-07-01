@@ -1,4 +1,4 @@
-import { productVariantCreateSchema } from "@/lib/apiTypes";
+import { productVariantBulkCreateSchema } from "@/lib/apiTypes";
 import { supabaseServer } from "@/lib/supabase";
 import { NextRequest, NextResponse } from "next/server";
 
@@ -54,24 +54,12 @@ async function getCurrentUserId(request: NextRequest) {
   return null;
 }
 
-function formatError(error: unknown) {
-  if (error instanceof Error) {
-    return { message: error.message, stack: error.stack };
-  }
-
-  try {
-    return JSON.parse(JSON.stringify(error, Object.getOwnPropertyNames(error)));
-  } catch {
-    return { message: String(error) };
-  }
-}
-
 async function upsertProductVariant(
   supabase: ReturnType<typeof supabaseServer>,
   productId: number,
   size: string,
   quantity: number,
-  createdBy: string,
+  createdBy: string | null,
 ) {
   const { data: existing, error: existingError } = await supabase
     .from("product_variants")
@@ -108,7 +96,6 @@ async function upsertProductVariant(
       if (logError) throw logError;
     }
 
-    await refreshCurrentStock(supabase, productId);
     return data;
   }
 
@@ -138,48 +125,9 @@ async function upsertProductVariant(
     if (logError) throw logError;
   }
 
-  await refreshCurrentStock(supabase, productId);
   return data;
 }
 
-// GET variants for product
-export async function GET(
-  request: NextRequest,
-  context: { params: Promise<{ id: string }> },
-) {
-  try {
-    const params = await context.params;
-    const id = params.id;
-    const productId = parseInt(id, 10);
-
-    if (isNaN(productId) || productId <= 0) {
-      return NextResponse.json(
-        { error: "Invalid product ID" },
-        { status: 400 },
-      );
-    }
-
-    const supabase = supabaseServer();
-
-    const { data, error } = await supabase
-      .from("product_variants")
-      .select("*")
-      .eq("product_id", productId)
-      .order("size", { ascending: true });
-
-    if (error) {
-      console.error("GET variants - DB error:", error);
-      return NextResponse.json([], { status: 500 });
-    }
-
-    return NextResponse.json(data || []);
-  } catch (error) {
-    console.error("GET variants - Catch error:", error);
-    return NextResponse.json([], { status: 500 });
-  }
-}
-
-// POST - create/update variant
 export async function POST(
   request: NextRequest,
   context: { params: Promise<{ id: string }> },
@@ -197,7 +145,7 @@ export async function POST(
       );
     }
 
-    const parseResult = productVariantCreateSchema.safeParse(body);
+    const parseResult = productVariantBulkCreateSchema.safeParse(body);
     if (!parseResult.success) {
       return NextResponse.json(
         {
@@ -209,7 +157,7 @@ export async function POST(
       );
     }
 
-    const { size, quantity } = parseResult.data;
+    const variants = parseResult.data;
     const supabase = supabaseServer();
     const createdBy = await getCurrentUserId(request);
 
@@ -223,20 +171,27 @@ export async function POST(
       return NextResponse.json({ error: "Product not found" }, { status: 404 });
     }
 
-    const data = await upsertProductVariant(
-      supabase,
-      productId,
-      size,
-      quantity,
-      createdBy,
-    );
+    const results = [];
+    for (const variant of variants) {
+      const data = await upsertProductVariant(
+        supabase,
+        productId,
+        variant.size,
+        variant.quantity,
+        createdBy,
+      );
+      results.push(data);
+    }
 
-    return NextResponse.json(data, { status: 200 });
+    await refreshCurrentStock(supabase, productId);
+
+    return NextResponse.json({ success: true, variants: results }, { status: 200 });
   } catch (error) {
-    const formatted = formatError(error);
-    console.error("POST variant error:", formatted);
+    console.error("POST bulk variant error:", error);
     return NextResponse.json(
-      { error: formatted.message ?? "Server error", details: formatted },
+      {
+        error: error instanceof Error ? error.message : "Server error",
+      },
       { status: 500 },
     );
   }

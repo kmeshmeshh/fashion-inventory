@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { createOrderSchema } from "@/lib/apiTypes";
 import { supabaseServer } from "@/lib/supabase";
 import { NextRequest, NextResponse } from "next/server";
@@ -176,18 +177,55 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    for (const item of items) {
+    const requiredVariantQuantities = new Map<
+      string,
+      {
+        product_id: number;
+        size: string;
+        quantity: number;
+      }
+    >();
+
+    const mergedItems = items.reduce((acc: any[], item: any) => {
+      const existing = acc.find(
+        (i) => i.product_id === item.product_id && i.size === item.size,
+      );
+
+      if (existing) {
+        existing.quantity += item.quantity;
+      } else {
+        acc.push({ ...item });
+      }
+
+      return acc;
+    }, []);
+
+    for (const item of mergedItems) {
+      const key = `${item.product_id}-${item.size}`;
+      const existing = requiredVariantQuantities.get(key);
+      requiredVariantQuantities.set(key, {
+        product_id: item.product_id,
+        size: item.size,
+        quantity: (existing?.quantity || 0) + item.quantity,
+      });
+    }
+
+    for (const {
+      product_id,
+      size,
+      quantity,
+    } of requiredVariantQuantities.values()) {
       const { data: variant, error: variantError } = await supabase
         .from("product_variants")
         .select("id, quantity")
-        .eq("product_id", item.product_id)
-        .eq("size", item.size)
+        .eq("product_id", product_id)
+        .eq("size", size)
         .maybeSingle();
 
       if (variantError) throw variantError;
-      if (!variant || variant.quantity < item.quantity) {
+      if (!variant || variant.quantity < quantity) {
         return NextResponse.json(
-          { error: `Insufficient stock for size ${item.size}` },
+          { error: `Insufficient stock for size ${size}` },
           { status: 400 },
         );
       }
@@ -199,7 +237,7 @@ export async function POST(request: NextRequest) {
 
     const order_number = `ORD-${String((count || 0) + 1).padStart(4, "0")}`;
 
-    const subtotal = items.reduce(
+    const subtotal = mergedItems.reduce(
       (sum, item) => sum + item.quantity * item.price_at_sale,
       0,
     );
@@ -233,7 +271,7 @@ export async function POST(request: NextRequest) {
 
     const orderId = orderData.id;
 
-    const orderItems = items.map((item) => ({
+    const orderItems = mergedItems.map((item) => ({
       order_id: orderId,
       product_id: item.product_id,
       quantity: item.quantity,
@@ -252,49 +290,61 @@ export async function POST(request: NextRequest) {
     }
 
     const variantInventory = new Map<string, number>();
-    for (const item of items) {
+    for (const { product_id, size } of requiredVariantQuantities.values()) {
       const { data: variant, error: variantError } = await supabase
         .from("product_variants")
         .select("id, quantity")
-        .eq("product_id", item.product_id)
-        .eq("size", item.size)
+        .eq("product_id", product_id)
+        .eq("size", size)
         .maybeSingle();
 
       if (variantError) throw variantError;
       if (!variant) {
         await rollbackOrder(supabase, orderId);
-        throw new Error(`Variant not found for size ${item.size}`);
+        throw new Error(`Variant not found for size ${size}`);
       }
 
-      variantInventory.set(`${item.product_id}-${item.size}`, variant.quantity);
+      variantInventory.set(`${product_id}-${size}`, variant.quantity);
     }
 
     const productIds = new Set<number>();
-    for (const item of items) {
-      const currentQuantity =
-        variantInventory.get(`${item.product_id}-${item.size}`) ?? 0;
-      const newQuantity = currentQuantity - item.quantity;
+
+    for (const {
+      product_id,
+      size,
+      quantity,
+    } of requiredVariantQuantities.values()) {
+      const key = `${product_id}-${size}`;
+      const originalQuantity = variantInventory.get(key) ?? 0;
+      const newQuantity = originalQuantity - quantity;
+
+      if (newQuantity < 0) {
+        await rollbackOrder(supabase, orderId, variantInventory);
+        throw new Error(
+          `Insufficient stock while deducting inventory for size ${size}`,
+        );
+      }
 
       const { data: updatedVariant, error: updateError } = await supabase
         .from("product_variants")
         .update({ quantity: newQuantity })
-        .eq("product_id", item.product_id)
-        .eq("size", item.size)
-        .gte("quantity", item.quantity)
+        .eq("product_id", product_id)
+        .eq("size", size)
+        .gte("quantity", quantity)
         .select()
         .single();
 
       if (updateError || !updatedVariant) {
-        await rollbackOrder(supabase, orderId);
-        throw new Error(`Failed to deduct inventory for ${item.size}`);
+        await rollbackOrder(supabase, orderId, variantInventory);
+        throw new Error(`Failed to deduct inventory for size ${size}`);
       }
 
-      productIds.add(item.product_id);
+      productIds.add(product_id);
 
       const { error: logError } = await supabase.from("inventory_logs").insert([
         {
-          product_id: item.product_id,
-          quantity_changed: -item.quantity,
+          product_id,
+          quantity_changed: -quantity,
           reason: "order",
           reference_id: orderId,
           created_by: user.id,
@@ -302,7 +352,7 @@ export async function POST(request: NextRequest) {
       ]);
 
       if (logError) {
-        await rollbackOrder(supabase, orderId);
+        await rollbackOrder(supabase, orderId, variantInventory);
         throw logError;
       }
     }
@@ -336,9 +386,13 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json(orderData, { status: 201 });
   } catch (error) {
-    console.error("Order error:", error);
+    console.error("ORDER ERROR FULL:", error);
+
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Error" },
+      {
+        error: error instanceof Error ? error.message : JSON.stringify(error),
+        details: error,
+      },
       { status: 500 },
     );
   }

@@ -56,13 +56,22 @@ const defaultSizes: Record<(typeof SIZES)[number], number> = {
   XXL: 0,
 };
 const LOW_STOCK_THRESHOLD = 5;
+const SUGGESTED_MARKUP = 1.4;
 
 type ProductWithVariants = Product & {
   product_variants?: ProductVariant[];
 };
 
+type VariantPayload = {
+  size: string;
+  quantity: number;
+};
+
 const fmt = (n: number) =>
   new Intl.NumberFormat("ar-EG", { maximumFractionDigits: 0 }).format(n);
+
+const profitMarginPercent = (cost: number, sellingPrice: number) =>
+  cost > 0 ? ((sellingPrice - cost) / cost) * 100 : 0;
 
 export default function InventoryPage() {
   const { data: products, isLoading, refetch } = useProducts();
@@ -121,6 +130,38 @@ export default function InventoryPage() {
     }
   };
 
+  const suggestedSellingPrice = useMemo(() => {
+    const cost = parseFloat(formData.cost_per_unit);
+    if (Number.isNaN(cost) || cost <= 0) return "";
+    return (cost * SUGGESTED_MARKUP).toFixed(0);
+  }, [formData.cost_per_unit]);
+
+  const applySuggestedPrice = () => {
+    if (!suggestedSellingPrice) return;
+    setFormData((prev) => ({
+      ...prev,
+      selling_price: suggestedSellingPrice,
+    }));
+  };
+
+  const bulkUpsertProductVariants = async (
+    productId: number,
+    variants: VariantPayload[],
+  ) => {
+    const res = await fetch(`/api/products/${productId}/variants/bulk`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(variants),
+    });
+
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      throw new Error(
+        body?.error || "فشل حفظ أحجام المنتج. حاول مرة أخرى.",
+      );
+    }
+  };
+
   const handleSubmit = async () => {
     setLoading(true);
     try {
@@ -133,34 +174,34 @@ export default function InventoryPage() {
 
       if (editingId) {
         await updateProduct.mutateAsync({ id: editingId, ...payload });
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const product = products?.find((p: any) => p.id === editingId);
         const existingVariantSizes = new Set(
           product?.product_variants?.map((variant) => variant.size) || [],
         );
 
-        for (const [size, qty] of Object.entries(sizes) as [string, number][]) {
-          if (qty > 0 || existingVariantSizes.has(size)) {
-            await upsertProductVariant.mutateAsync({
-              productId: editingId,
-              size,
-              quantity: qty,
-            });
-          }
+        const variantsToSave = Object.entries(sizes).reduce(
+          (acc, [size, qty]) => {
+            if (qty > 0 || existingVariantSizes.has(size)) {
+              acc.push({ size, quantity: qty });
+            }
+            return acc;
+          },
+          [] as VariantPayload[],
+        );
+
+        if (variantsToSave.length > 0) {
+          await bulkUpsertProductVariants(editingId, variantsToSave);
         }
       } else {
         const product = await createProduct.mutateAsync(payload);
         if (product?.id) {
-          for (const [size, qty] of Object.entries(sizes) as [
-            string,
-            number,
-          ][]) {
-            if (qty > 0) {
-              await upsertProductVariant.mutateAsync({
-                productId: product.id,
-                size,
-                quantity: qty,
-              });
-            }
+          const variantsToSave = Object.entries(sizes)
+            .filter(([, qty]) => qty > 0)
+            .map(([size, qty]) => ({ size, quantity: qty }));
+
+          if (variantsToSave.length > 0) {
+            await bulkUpsertProductVariants(product.id, variantsToSave);
           }
         }
       }
@@ -188,12 +229,10 @@ export default function InventoryPage() {
     const totals = productList.reduce(
       (acc, product) => {
         const stock = totalStock(product);
-        const margin =
-          product.selling_price > 0
-            ? ((product.selling_price - product.cost_per_unit) /
-                product.selling_price) *
-              100
-            : 0;
+        const margin = profitMarginPercent(
+          product.cost_per_unit,
+          product.selling_price,
+        );
 
         acc.totalUnits += stock;
         acc.totalVariants += product.product_variants?.length || 0;
@@ -467,12 +506,10 @@ export default function InventoryPage() {
             const stock = totalStock(product);
             const isLow = stock > 0 && stock <= LOW_STOCK_THRESHOLD;
             const isOut = stock === 0;
-            const margin =
-              product.selling_price > 0
-                ? ((product.selling_price - product.cost_per_unit) /
-                    product.selling_price) *
-                  100
-                : 0;
+            const margin = profitMarginPercent(
+              product.cost_per_unit,
+              product.selling_price,
+            );
 
             return (
               <Card
@@ -672,17 +709,38 @@ export default function InventoryPage() {
               </div>
             </div>
 
+            {suggestedSellingPrice && (
+              <div className="flex flex-col gap-2 rounded-lg border border-zinc-700 bg-zinc-950/80 p-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-zinc-400 text-xs">السعر المقترح</p>
+                    <p className="text-white font-semibold">{suggestedSellingPrice} EGP</p>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={applySuggestedPrice}
+                    className="min-w-[120px]"
+                  >
+                    استخدم الاقتراح
+                  </Button>
+                </div>
+                <p className="text-zinc-500 text-xs">
+                  يعتمد على هامش ربح افتراضي {Math.round((SUGGESTED_MARKUP - 1) * 100)}%.
+                </p>
+              </div>
+            )}
+
             {formData.cost_per_unit && formData.selling_price && (
               <div className="flex items-center justify-between bg-violet-500/10 rounded-lg px-3 py-2">
                 <span className="text-xs text-zinc-400">
                   هامش الربح المتوقع
                 </span>
                 <span className="text-sm font-bold text-violet-400 tabular-nums">
-                  {(
-                    ((parseFloat(formData.selling_price) -
-                      parseFloat(formData.cost_per_unit)) /
-                      parseFloat(formData.selling_price)) *
-                    100
+                  {profitMarginPercent(
+                    parseFloat(formData.cost_per_unit),
+                    parseFloat(formData.selling_price),
                   ).toFixed(0)}
                   %
                 </span>

@@ -311,6 +311,34 @@ export default function OrdersPage() {
       (p: any) => p.id === parseInt(newItem.product_id, 10),
     );
     if (!product) return;
+    const existingItem = items.find(
+      (i) =>
+        i.product_id === parseInt(newItem.product_id, 10) &&
+        i.size === newItem.size,
+    );
+
+    if (existingItem) {
+      setItems(
+        items.map((i) =>
+          i.product_id === existingItem.product_id &&
+          i.size === existingItem.size
+            ? {
+                ...i,
+                quantity: i.quantity + qty,
+              }
+            : i,
+        ),
+      );
+
+      setNewItem({
+        product_id: "",
+        size: "",
+        quantity: "",
+      });
+
+      setVariants([]);
+      return;
+    }
     setItems([
       ...items,
       {
